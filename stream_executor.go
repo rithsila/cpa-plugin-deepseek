@@ -71,12 +71,12 @@ func (t *terminalTracker) isTerminal(eventType string, data []byte) bool {
 	return false
 }
 
-// ExecuteStream forwards one streaming request to DeepSeek. On responses and
-// anthropic every upstream chunk is handed on unchanged, framing included; on
-// chat the chunks are split into bare payloads because the host frames that
-// surface. A stream that ends without a terminal event is closed with the
-// protocol's own failure event so the client can tell truncation from a normal
-// finish.
+// ExecuteStream forwards one streaming request to DeepSeek. The bytes and their
+// order are preserved on every surface; only the chunk boundaries differ. On
+// responses and anthropic they are cut on SSE line boundaries, on chat the
+// chunks become bare payloads because the host frames that surface. A stream
+// that ends without a terminal event is closed with the protocol's own failure
+// event so the client can tell truncation from a normal finish.
 func (p *Plugin) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorStreamResponse, error) {
 	call, err := p.prepareCall(req)
 	if err != nil {
@@ -111,25 +111,32 @@ func (p *Plugin) ExecuteStream(ctx context.Context, req pluginapi.ExecutorReques
 
 // forwardChunks hands each upstream chunk to the host and closes the stream
 // exactly once, including when the consumer stops reading or the request is
-// cancelled (the source is drained so the host can release it). Chunks keep their
-// upstream framing except on chat, where the host does the framing and expects
-// bare payloads.
+// cancelled (the source is drained so the host can release it). Responses and
+// anthropic chunks are re-cut on line boundaries; chat chunks travel as bare
+// payloads because the host does the framing for that surface.
 func (p *Plugin) forwardChunks(ctx context.Context, source <-chan pluginapi.HTTPStreamChunk, format string) <-chan pluginapi.ExecutorStreamChunk {
 	out := make(chan pluginapi.ExecutorStreamChunk)
 	go func() {
 		defer close(out)
 		tracker := newTerminalTracker(format)
 		unframer := &chatUnframer{}
+		framer := &lineFramer{}
 		for chunk := range source {
 			if chunk.Err != nil {
 				// A broken upstream stream never produced its own terminal
 				// event, so the client gets ours instead of a silent truncation.
+				// Whatever part of the last line did arrive still goes first: the
+				// terminal frame ends the stream, so anything sent after it can be
+				// dropped by the client.
+				if trailing := framer.take(); len(trailing) > 0 {
+					sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: trailing})
+				}
 				sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: failureFrame(format, chunk.Err)})
 				tracker.seen = true
 				continue
 			}
 			// Chat chunks travel as bare payloads because the host frames them;
-			// the other surfaces forward complete SSE frames.
+			// the other surfaces forward complete SSE lines.
 			if format == formatChat {
 				payloads, done := unframer.push(chunk.Payload)
 				if done {
@@ -144,10 +151,15 @@ func (p *Plugin) forwardChunks(ctx context.Context, source <-chan pluginapi.HTTP
 				continue
 			}
 			tracker.observe(chunk.Payload)
-			if !sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: chunk.Payload}) {
-				drainSource(source)
-				return
+			if payload := framer.push(chunk.Payload); len(payload) > 0 {
+				if !sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: payload}) {
+					drainSource(source)
+					return
+				}
 			}
+		}
+		if trailing := framer.take(); len(trailing) > 0 {
+			sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: trailing})
 		}
 		if !tracker.seen {
 			sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: failureFrame(format, errStreamEndedWithoutTerminal)})
@@ -157,6 +169,36 @@ func (p *Plugin) forwardChunks(ctx context.Context, source <-chan pluginapi.HTTP
 }
 
 var errStreamEndedWithoutTerminal = fmt.Errorf("upstream stream ended before a terminal event")
+
+// lineFramer emits only whole SSE lines. The host assembles plugin chunks into
+// lines but caps that buffer at 64KB and drops whatever it holds once the cap is
+// exceeded. A Responses terminal frame echoes instructions and tools back, so it
+// routinely exceeds 64KB: split across chunks it would lose the usage block it
+// carries. Sent as one line-terminated chunk the host consumes it in the same
+// pass and the cap never applies.
+type lineFramer struct {
+	carry []byte
+}
+
+// push returns the longest newline-terminated prefix of the bytes seen so far.
+func (f *lineFramer) push(payload []byte) []byte {
+	f.carry = append(f.carry, payload...)
+	idx := bytes.LastIndexByte(f.carry, '\n')
+	if idx < 0 {
+		return nil
+	}
+	out := append([]byte(nil), f.carry[:idx+1]...)
+	f.carry = append(f.carry[:0], f.carry[idx+1:]...)
+	return out
+}
+
+// take returns whatever is left once the upstream stream ended. A conforming
+// stream leaves nothing behind; a truncated one keeps its last partial frame.
+func (f *lineFramer) take() []byte {
+	out := f.carry
+	f.carry = nil
+	return out
+}
 
 // sendChunk reports whether the consumer is still there.
 func sendChunk(ctx context.Context, out chan<- pluginapi.ExecutorStreamChunk, chunk pluginapi.ExecutorStreamChunk) bool {

@@ -55,6 +55,70 @@ func TestStreamForwardsEveryFrameVerbatim(t *testing.T) {
 	}
 }
 
+func TestStreamSplitsChunksOnSSELineBoundaries(t *testing.T) {
+	// The host drops buffered data once 64KB accumulates without a newline, and a
+	// Responses terminal frame echoing instructions and tools is routinely larger
+	// than that. Upstream boundaries must therefore never cut a line across the
+	// chunks we emit.
+	echo := strings.Repeat("i", 70*1024)
+	terminal := `event: response.completed` + "\n" +
+		`data: {"type":"response.completed","response":{"instructions":"` + echo +
+		`","usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}}` + "\n\n"
+	joined := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n" + terminal
+
+	// Upstream cuts the terminal frame at arbitrary byte offsets.
+	upstream := []string{joined[:9000], joined[9000:51200], joined[51200:]}
+	bridge := &fakeBridge{stream: streamOf(200, upstream...)}
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.ExecuteStream(context.Background(),
+		streamRequest(Provider+"/deepseek-v4-pro", `{"model":"x","stream":true}`, formatResponses))
+	if err != nil {
+		t.Fatalf("ExecuteStream() error = %v", err)
+	}
+
+	got := collect(t, resp.Chunks)
+	if strings.Join(got, "") != joined {
+		t.Fatal("emitted bytes differ from the upstream bytes")
+	}
+	for i, chunk := range got {
+		if !strings.HasSuffix(chunk, "\n") {
+			t.Errorf("chunk %d ends mid-line: %q...", i, chunk[max(0, len(chunk)-40):])
+		}
+	}
+}
+
+func TestStreamFlushesPartialLineBeforeTheFailureFrame(t *testing.T) {
+	// The failure frame ends the stream, so a client is free to ignore anything
+	// after it. The tail of an unterminated upstream line must therefore be
+	// emitted first.
+	partial := `data: {"type":"response.output_text.delta","delta":"unterminated`
+	chunks := make(chan pluginapi.HTTPStreamChunk, 2)
+	chunks <- pluginapi.HTTPStreamChunk{Payload: []byte(partial)}
+	chunks <- pluginapi.HTTPStreamChunk{Err: errors.New("upstream reset")}
+	close(chunks)
+
+	bridge := &fakeBridge{stream: pluginapi.HTTPStreamResponse{StatusCode: 200, Chunks: chunks}}
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.ExecuteStream(context.Background(),
+		streamRequest(Provider+"/deepseek-v4-pro", `{"model":"x","stream":true}`, formatResponses))
+	if err != nil {
+		t.Fatalf("ExecuteStream() error = %v", err)
+	}
+
+	got := collect(t, resp.Chunks)
+	if len(got) != 2 {
+		t.Fatalf("chunks = %d, want the partial line followed by one failure frame", len(got))
+	}
+	if got[0] != partial {
+		t.Errorf("chunk 0 = %q, want the buffered partial line", got[0])
+	}
+	if !strings.HasPrefix(got[1], "event: response.failed\n") {
+		t.Errorf("chunk 1 = %q, want a response.failed event", got[1])
+	}
+}
+
 func TestStreamEndingWithoutTerminalGetsFailureFrame(t *testing.T) {
 	frames := []string{
 		"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
