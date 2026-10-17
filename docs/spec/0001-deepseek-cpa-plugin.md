@@ -18,7 +18,7 @@
 
 凭证交给宿主：插件声明凭证解析能力，管理页通过宿主的凭证写入回调增删 key，轮转、限流、用量记账都由宿主完成。插件不复制一份密钥池。
 
-缺失或需要归一化的 thinking 参数由插件按当前载荷所处协议写入正确的字段。
+thinking 参数由客户端按它所用协议的字段写入，插件原样透传、不改写（见 ADR-0004）。
 
 上游的 401、402、429 原样透出，让宿主调度器看见并切换凭证；流式开始后上游断流，插件按协议发终态错误事件，而不是补一个正常结束。
 
@@ -61,13 +61,13 @@
 
 **协议面对齐。** 插件声明 `executor` 且同时声明三个协议的输入与输出格式：`chat-completions`、`responses`、`anthropic`。出站端点由入站协议决定，无额外配置项。这是 ADR-0001 的结论。
 
-**不声明恒等能力面。** `request_translator`、`response_translator`、`request_normalizer`、`response_normalizer`、`request_interceptor`、`response_interceptor`、`response_stream_interceptor`、`model_router`、`command_line_plugin` 全部不声明。声明六个真实能力面：`auth_provider`、`model_provider`、`executor`、`thinking_applier`、`usage_plugin`、`management_api`。
+**不声明恒等能力面。** `request_translator`、`response_translator`、`request_normalizer`、`response_normalizer`、`request_interceptor`、`response_interceptor`、`response_stream_interceptor`、`model_router`、`command_line_plugin` 全部不声明。声明五个真实能力面：`auth_provider`、`model_provider`、`executor`、`usage_plugin`、`management_api`。
 
 **凭证归属。** 实现 `auth.identifier` 与 `auth.parse`。`auth.login.start`、`auth.login.poll`、`auth.refresh` 显式返回不支持——DeepSeek key 不过期，这三者对它是空活。凭证由管理页经宿主的凭证写入回调产生。这是 ADR-0002 的结论。
 
 **模型公布。** 以 `model.static` 公布，配合 `executor_model_scope: static`。模型列表来自懒探测：注册阶段不联网，用内置默认列表应答；首次真正需要列表时向上游取并缓存；管理页可显式触发刷新。探测结果是列表真相，内置默认只在尚未探测成功时兜底。上游名与客户端可见名之间的差异只由前缀承载。
 
-**thinking 写入。** 实现 `thinking_applier`。宿主传入的 `Config` 已归一化，但请求不携带协议格式，因此按载荷结构判定：存在 `input` 判为 `responses`，存在顶层 `system` 且存在 `max_tokens` 判为 `anthropic`，其余按 `chat-completions`。三套字段分别写入。这是 ADR-0003 的结论。
+**thinking 不做插件侧写入。** 不实现 `thinking_applier`。宿主查找 applier 用的是协议格式名（`claude` / `openai` / `codex`），而插件的 applier 以 `thinking.identifier` 注册，两者永不相等，因此本插件的 applier 在这版宿主上不可能被调用；改用原生格式名注册也会被宿主以「与原生 applier 冲突」拒绝。同时宿主不对 `UserDefined` 的插件模型剥离 thinking 字段，客户端的 thinking 参数本来就能原样到达上游。结论：透传已经足够，多写一个不可达的能力面只会增加误导。这是 ADR-0004 的结论，取代 ADR-0003。
 
 **错误语义。** 上游的 401、402、429 与其它状态码原样作为执行结果透出，executor 内部不重试、不改写状态码，让宿主调度器据此切换凭证。仅在需要携带宿主可识别的错误信息时才附加错误体，不吞掉原始状态。
 
@@ -85,7 +85,7 @@
 
 **好测试的标准。** 只断言外部行为：给定客户端输入，断言上游收到的字节与插件交给宿主的字节。不断言内部函数调用顺序、不 mock 插件自己的类型、不为覆盖率写测试。零转换直通这个特性本身就等价于「字节保真」，因此字节级断言不是实现细节，而是行为契约。
 
-**缝 A（主缝）。** 在 Go 层通过插件构建入口拿到能力面接口，用 Go 结构体直接调用各方法。绝大多数测试落在这里：模型前缀裁切、协议到端点的映射、thinking 三套字段写入、错误状态码透传、流式终态错误事件、用量记录形状、能力面声明。
+**缝 A（主缝）。** 在 Go 层通过插件构建入口拿到能力面接口，用 Go 结构体直接调用各方法。绝大多数测试落在这里：模型前缀裁切、协议到端点的映射、thinking 字段原样透传、错误状态码透传、流式终态错误事件、用量记录形状、能力面声明。
 
 **缝 B（传输边界）。** 插件对上层的 HTTP 与凭证写入调用集中在一个窄接口后面，测试注入假实现并记录插件交给宿主的 `HTTPRequest`。假上游落在这一层而不是真起 HTTP server：它比 server 更靠近契约，且 URL 是编译期常量。这里断言两类契约：非流式请求的上游 body 与客户端原始 body 除模型名外逐字节一致；流式响应的帧序列逐条、逐字节与上游返回一致。三个协议面在这里用表驱动覆盖，不为每个协议单开一条测试路径。
 

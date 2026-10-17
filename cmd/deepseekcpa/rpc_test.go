@@ -96,7 +96,7 @@ func TestRegisterReturnsCapabilityDeclaration(t *testing.T) {
 		t.Errorf("SchemaVersion = %d, want %d", reg.SchemaVersion, pluginabi.SchemaVersion)
 	}
 	caps := reg.Capabilities
-	if !caps.ModelProvider || !caps.AuthProvider || !caps.Executor || !caps.ThinkingApplier || !caps.UsagePlugin || !caps.ManagementAPI {
+	if !caps.ModelProvider || !caps.AuthProvider || !caps.Executor || !caps.UsagePlugin || !caps.ManagementAPI {
 		t.Errorf("missing capability in declaration: %+v", caps)
 	}
 	if caps.ExecutorModelScope != pluginapi.ExecutorModelScopeStatic {

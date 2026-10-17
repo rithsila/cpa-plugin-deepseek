@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0004
+---
+
 # thinking.apply 靠 body 形状分发
 
 宿主调用 `thinking.apply` 时只给 `Provider`、`Model`、已归一的 `Config`（Mode/Budget/Level）和 `Body`，**不给协议格式**。而 DeepSeek 三个协议面的 thinking 字段完全不同：`chat-completions` 用 `thinking.type` + `reasoning_effort`，`anthropic` 用 `reasoning.effort` + `output_config.effort`，`responses` 用 `reasoning.effort`。

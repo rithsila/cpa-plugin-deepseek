@@ -58,9 +58,8 @@ func Build(configYAML []byte, bridge HostBridge) (pluginapi.Plugin, *Plugin, err
 			ExecutorOutputFormats: []string{
 				"chat-completions", "responses", "anthropic",
 			},
-			ThinkingApplier: p,
-			UsagePlugin:     p,
-			ManagementAPI:   p,
+			UsagePlugin:   p,
+			ManagementAPI: p,
 		},
 	}, p, nil
 }
@@ -113,12 +112,6 @@ func (p *Plugin) HttpRequest(context.Context, pluginapi.ExecutorHTTPRequest) (pl
 	return pluginapi.ExecutorHTTPResponse{}, notImplemented("executor.http_request")
 }
 
-// ApplyThinking writes the host-normalised thinking configuration into the
-// provider payload. See docs/adr/0003.
-func (p *Plugin) ApplyThinking(context.Context, pluginapi.ThinkingApplyRequest) (pluginapi.PayloadResponse, error) {
-	return pluginapi.PayloadResponse{}, notImplemented("thinking.apply")
-}
-
 // HandleUsage receives completed usage records from the host. Structured usage
 // logging lands with the usage ticket; the capability is declared now so the
 // host routes records to this plugin from the first release.
@@ -136,7 +129,6 @@ var (
 	_ pluginapi.AuthProvider      = (*Plugin)(nil)
 	_ pluginapi.ModelProvider     = (*Plugin)(nil)
 	_ pluginapi.ProviderExecutor  = (*Plugin)(nil)
-	_ pluginapi.ThinkingApplier   = (*Plugin)(nil)
 	_ pluginapi.UsagePlugin       = (*Plugin)(nil)
 	_ pluginapi.ManagementAPI     = (*Plugin)(nil)
 	_ pluginapi.ManagementHandler = (*Plugin)(nil)

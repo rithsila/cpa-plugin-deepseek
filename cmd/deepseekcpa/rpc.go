@@ -52,7 +52,6 @@ type registrationCapability struct {
 	ExecutorModelScope    pluginapi.ExecutorModelScope `json:"executor_model_scope"`
 	ExecutorInputFormats  []string                     `json:"executor_input_formats,omitempty"`
 	ExecutorOutputFormats []string                     `json:"executor_output_formats,omitempty"`
-	ThinkingApplier       bool                         `json:"thinking_applier"`
 	UsagePlugin           bool                         `json:"usage_plugin"`
 	ManagementAPI         bool                         `json:"management_api"`
 }
@@ -144,7 +143,7 @@ func (s *server) handle(method string, payload []byte) ([]byte, error) {
 	case pluginabi.MethodModelForAuth:
 		var req pluginapi.AuthModelRequest
 		return decodeInto(payload, &req, func() (any, error) { return instance.ModelsForAuth(ctx, req) })
-	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier, pluginabi.MethodThinkingIdentifier:
+	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return okEnvelope(identifierResponse{Identifier: instance.Identifier()})
 	case pluginabi.MethodAuthParse:
 		var req pluginapi.AuthParseRequest
@@ -169,9 +168,6 @@ func (s *server) handle(method string, payload []byte) ([]byte, error) {
 	case pluginabi.MethodExecutorHTTPRequest:
 		var req pluginapi.ExecutorHTTPRequest
 		return decodeInto(payload, &req, func() (any, error) { return instance.HttpRequest(ctx, req) })
-	case pluginabi.MethodThinkingApply:
-		var req pluginapi.ThinkingApplyRequest
-		return decodeInto(payload, &req, func() (any, error) { return instance.ApplyThinking(ctx, req) })
 	case pluginabi.MethodUsageHandle:
 		var record pluginapi.UsageRecord
 		if err := json.Unmarshal(payload, &record); err != nil {
@@ -284,7 +280,6 @@ func describeRegistration(descriptor pluginapi.Plugin) registration {
 			ExecutorModelScope:    caps.ExecutorModelScope,
 			ExecutorInputFormats:  caps.ExecutorInputFormats,
 			ExecutorOutputFormats: caps.ExecutorOutputFormats,
-			ThinkingApplier:       caps.ThinkingApplier != nil,
 			UsagePlugin:           caps.UsagePlugin != nil,
 			ManagementAPI:         caps.ManagementAPI != nil,
 		},

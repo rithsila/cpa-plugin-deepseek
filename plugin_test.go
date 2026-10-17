@@ -33,18 +33,16 @@ func TestBuildDeclaresOnlyImplementedCapabilities(t *testing.T) {
 		"request_interceptor":        caps.RequestInterceptor != nil,
 		"response_interceptor":       caps.ResponseInterceptor != nil,
 		"stream_chunk_interceptor":   caps.StreamChunkInterceptor != nil,
-		"thinking_applier":           caps.ThinkingApplier != nil,
 		"usage_plugin":               caps.UsagePlugin != nil,
 		"command_line_plugin":        caps.CommandLinePlugin != nil,
 		"management_api":             caps.ManagementAPI != nil,
 	}
 	want := map[string]bool{
-		"model_provider":   true,
-		"auth_provider":    true,
-		"executor":         true,
-		"thinking_applier": true,
-		"usage_plugin":     true,
-		"management_api":   true,
+		"model_provider": true,
+		"auth_provider":  true,
+		"executor":       true,
+		"usage_plugin":   true,
+		"management_api": true,
 	}
 	for name, got := range declared {
 		if got != want[name] {
@@ -113,9 +111,6 @@ func TestUnimplementedCapabilitiesFailLoudly(t *testing.T) {
 	if _, err := descriptor.Capabilities.Executor.CountTokens(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("CountTokens error = %v, want ErrNotImplemented", err)
 	}
-	if _, err := descriptor.Capabilities.ThinkingApplier.ApplyThinking(ctx, pluginapi.ThinkingApplyRequest{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ApplyThinking error = %v, want ErrNotImplemented", err)
-	}
 	if _, err := descriptor.Capabilities.Executor.HttpRequest(ctx, pluginapi.ExecutorHTTPRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("HttpRequest error = %v, want ErrNotImplemented", err)
 	}
@@ -131,9 +126,6 @@ func TestIdentifiersUsePluginID(t *testing.T) {
 	}
 	if got := descriptor.Capabilities.Executor.Identifier(); got != Provider {
 		t.Errorf("executor Identifier() = %q, want %q", got, Provider)
-	}
-	if got := descriptor.Capabilities.ThinkingApplier.Identifier(); got != Provider {
-		t.Errorf("thinking Identifier() = %q, want %q", got, Provider)
 	}
 }
 
