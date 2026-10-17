@@ -45,15 +45,17 @@ const keysPage = `<!doctype html>
 <h1>DeepSeek Keys</h1>
 <p class="hint">密钥由 CLIProxyAPI 托管，保存在宿主的凭证目录里。本页只是调用管理接口的界面，密钥本身不会出现在页面里。</p>
 
-<section>
+<section id="mgmt-section">
   <h2>管理密钥</h2>
-  <div class="row">
+  <p class="hint" id="mgmt-note" style="margin:0 0 10px">CLIProxyAPI 管理密钥。面板登录时勾选过「记住密码」的话，这里会自动读取，无需再填。</p>
+  <div class="row" id="mgmt-form">
     <div>
-      <label for="mgmt">CLIProxyAPI 管理密钥（只需填一次，存在本机浏览器）</label>
+      <label for="mgmt">管理密钥</label>
       <input id="mgmt" type="password" autocomplete="off" placeholder="management secret-key">
     </div>
     <button id="save-mgmt">保存</button>
   </div>
+  <button id="change-mgmt" style="display:none">更换管理密钥</button>
 </section>
 
 <section>
@@ -90,8 +92,54 @@ const keysPage = `<!doctype html>
     status.className = kind || "";
   }
 
+  // The management panel stores the key under localStorage["managementKey"],
+  // obfuscated as "enc::v1::" + base64(XOR(utf8(JSON), key)) where key is derived
+  // from the page host, the user agent and a fixed salt. Reading it here means a
+  // user who ticked "remember password" in the panel never retypes it.
+  var PANEL_STORE_KEY = "managementKey";
+  var OBFUSCATION_PREFIX = "enc::v1::";
+  var OBFUSCATION_SALT = "cli-proxy-api-webui::secure-storage";
+
+  function panelManagementKey() {
+    var raw;
+    try {
+      raw = localStorage.getItem(PANEL_STORE_KEY);
+    } catch (e) {
+      return "";
+    }
+    if (!raw || raw.indexOf(OBFUSCATION_PREFIX) !== 0) {
+      return "";
+    }
+    try {
+      var key = new TextEncoder().encode(
+        OBFUSCATION_SALT + "|" + window.location.host + "|" + navigator.userAgent
+      );
+      var binary = atob(raw.slice(OBFUSCATION_PREFIX.length));
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i) ^ key[i % key.length];
+      }
+      var decoded = JSON.parse(new TextDecoder().decode(bytes));
+      if (typeof decoded !== "string") {
+        return "";
+      }
+      var value = decoded.trim();
+      // A mismatched host or user agent turns the tail into garbage that can
+      // still parse; only accept something shaped like a management key, because
+      // a wrong guess costs one of the host's five failed attempts.
+      if (!/^[\x21-\x7e]{4,256}$/.test(value)) {
+        return "";
+      }
+      return value;
+    } catch (e) {
+      // A different panel version, a changed user agent, or a rotated key: fall
+      // back to asking instead of guessing.
+      return "";
+    }
+  }
+
   function managementKey() {
-    return mgmtInput.value || localStorage.getItem(STORE) || "";
+    return mgmtInput.value || panelManagementKey() || localStorage.getItem(STORE) || "";
   }
 
   function call(method, path, body) {
@@ -168,15 +216,38 @@ const keysPage = `<!doctype html>
     if (!managementKey()) {
       keysBox.className = "empty";
       keysBox.textContent = "填写管理密钥后加载。";
+      showKeyForm();
       return Promise.resolve();
     }
     return call("GET", BASE)
-      .then(function (payload) { renderKeys(payload && payload.keys); })
+      .then(function (payload) {
+        renderKeys(payload && payload.keys);
+        hideKeyForm();
+      })
       .catch(function (error) {
         keysBox.className = "empty";
         keysBox.textContent = "加载失败。";
         setStatus(error.message, "error");
+        showKeyForm("管理密钥无效或已变更，请重新输入。");
       });
+  }
+
+  var mgmtForm = document.getElementById("mgmt-form");
+  var mgmtNote = document.getElementById("mgmt-note");
+  var changeButton = document.getElementById("change-mgmt");
+
+  function showKeyForm(note) {
+    mgmtForm.style.display = "";
+    changeButton.style.display = "none";
+    mgmtNote.textContent = note || "CLIProxyAPI 管理密钥。本插件只在本机浏览器保存一次，之后不再询问。";
+  }
+
+  function hideKeyForm() {
+    mgmtForm.style.display = "none";
+    changeButton.style.display = "";
+    mgmtNote.textContent = panelManagementKey()
+      ? "已使用面板记住的管理密钥（勾选了「记住密码」）。"
+      : "已使用本机保存的管理密钥。";
   }
 
   document.getElementById("save-mgmt").addEventListener("click", function () {
@@ -184,7 +255,18 @@ const keysPage = `<!doctype html>
     if (!value) { setStatus("管理密钥不能为空", "error"); return; }
     localStorage.setItem(STORE, value);
     setStatus("管理密钥已保存在本机浏览器", "ok");
-    load();
+    load().then(function () {
+      // Only hide the form once the stored key actually worked: a wrong key
+      // counts toward the host's failed-attempt ban, so it must stay visible.
+      if (status.className === "ok") { hideKeyForm(); } else { showKeyForm("密钥无效，请重新输入。"); }
+    });
+  });
+
+  changeButton.addEventListener("click", function () {
+    mgmtInput.value = "";
+    localStorage.removeItem(STORE);
+    showKeyForm("输入新的管理密钥。面板里勾选过「记住密码」时，下次仍会优先读面板的值。");
+    mgmtInput.focus();
   });
 
   document.getElementById("add").addEventListener("click", function () {
@@ -202,9 +284,21 @@ const keysPage = `<!doctype html>
       .then(function () { button.disabled = false; });
   });
 
+  var fromPanel = panelManagementKey();
   var saved = localStorage.getItem(STORE);
-  if (saved) { mgmtInput.value = saved; }
-  load();
+  if (fromPanel) {
+    mgmtForm.style.display = "none";
+    mgmtNote.textContent = "已使用面板记住的管理密钥（勾选了「记住密码」）。";
+    load();
+  } else if (saved) {
+    mgmtInput.value = saved;
+    mgmtForm.style.display = "none";
+    mgmtNote.textContent = "正在使用本机保存的管理密钥…";
+    load();
+  } else {
+    showKeyForm();
+    load();
+  }
 })();
 </script>
 </body>

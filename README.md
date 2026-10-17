@@ -61,7 +61,9 @@ curl -s -H "X-Management-Key: <你的管理密钥>" \
 
 ### 管理面板（推荐）
 
-管理面板 → 插件 → **DeepSeek Keys**（`/v0/resource/plugins/deepseek-cpa/credentials`）。页面里填一次管理密钥（存在该站点的 localStorage），之后可以直接查看、添加、删除密钥。
+管理面板 → 插件 → **DeepSeek Keys**（`/v0/resource/plugins/deepseek-cpa/credentials`）。
+
+面板登录时勾选过「记住密码」的话，页面会自动读取并解码面板保存的那把管理密钥，不需要再填；否则才提示输入（只在本机浏览器保存一次）。之后可以直接查看、添加、删除密钥。
 
 ### 命令行
 

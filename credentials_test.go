@@ -487,7 +487,9 @@ func TestKeysPageIsServedWithoutLeakingAnything(t *testing.T) {
 		`"/v0/management/plugins/"`, // the authenticated API base
 		`id="apikey"`,               // add form
 		`id="mgmt"`,                 // management key field
+		`id="mgmt-form"`,            // the field it hides once the key works
 		`id="keys"`,                 // list container
+		`hideKeyForm`,               // asks for the key only when it is unknown
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page does not contain %q", want)
