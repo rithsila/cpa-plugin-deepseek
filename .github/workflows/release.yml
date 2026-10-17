@@ -89,7 +89,8 @@ jobs:
         with:
           release: "14.1"
           usesh: true
-          sync: true
+          # sync expects a method name, not a boolean.
+          sync: rsync
           prepare: pkg install -y go python3
           envs: VERSION,TARGET
           run: ./scripts/package-release.sh "$VERSION" "$TARGET"
