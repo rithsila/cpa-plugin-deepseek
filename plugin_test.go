@@ -116,8 +116,8 @@ func TestUnimplementedCapabilitiesFailLoudly(t *testing.T) {
 	if _, err := descriptor.Capabilities.ThinkingApplier.ApplyThinking(ctx, pluginapi.ThinkingApplyRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("ApplyThinking error = %v, want ErrNotImplemented", err)
 	}
-	if _, err := descriptor.Capabilities.Executor.ExecuteStream(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ExecuteStream error = %v, want ErrNotImplemented", err)
+	if _, err := descriptor.Capabilities.Executor.HttpRequest(ctx, pluginapi.ExecutorHTTPRequest{}); !errors.Is(err, ErrNotImplemented) {
+		t.Errorf("HttpRequest error = %v, want ErrNotImplemented", err)
 	}
 }
 

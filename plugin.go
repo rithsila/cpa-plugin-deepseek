@@ -103,11 +103,6 @@ func (p *Plugin) RefreshAuth(context.Context, pluginapi.AuthRefreshRequest) (plu
 	return pluginapi.AuthRefreshResponse{}, unsupported("auth.refresh", "DeepSeek API keys do not expire, so there is nothing to refresh")
 }
 
-// ExecuteStream forwards one streaming request upstream.
-func (p *Plugin) ExecuteStream(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorStreamResponse, error) {
-	return pluginapi.ExecutorStreamResponse{}, notImplemented("executor.execute_stream")
-}
-
 // CountTokens is not backed by an upstream endpoint.
 func (p *Plugin) CountTokens(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
 	return pluginapi.ExecutorResponse{}, notImplemented("executor.count_tokens")

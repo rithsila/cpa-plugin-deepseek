@@ -23,6 +23,8 @@ type fakeBridge struct {
 	saveErr    error
 	doResponse pluginapi.HTTPResponse
 	doErr      error
+	stream     pluginapi.HTTPStreamResponse
+	streamErr  error
 }
 
 func (f *fakeBridge) Log(_ context.Context, level, message string) error {
@@ -53,8 +55,22 @@ func (f *fakeBridge) Do(_ context.Context, req pluginapi.HTTPRequest) (pluginapi
 	return f.doResponse, nil
 }
 
-func (f *fakeBridge) DoStream(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {
-	return pluginapi.HTTPStreamResponse{}, errors.New("fake bridge: DoStream not expected")
+func (f *fakeBridge) DoStream(_ context.Context, req pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {
+	if f.streamErr != nil {
+		return pluginapi.HTTPStreamResponse{}, f.streamErr
+	}
+	f.requests = append(f.requests, req)
+	return f.stream, nil
+}
+
+// streamOf turns fixed payloads into a closed stream response.
+func streamOf(status int, payloads ...string) pluginapi.HTTPStreamResponse {
+	chunks := make(chan pluginapi.HTTPStreamChunk, len(payloads))
+	for _, payload := range payloads {
+		chunks <- pluginapi.HTTPStreamChunk{Payload: []byte(payload)}
+	}
+	close(chunks)
+	return pluginapi.HTTPStreamResponse{StatusCode: status, Chunks: chunks}
 }
 
 func newManagementPlugin(t *testing.T, bridge *fakeBridge) *Plugin {

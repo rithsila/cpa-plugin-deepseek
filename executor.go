@@ -36,35 +36,60 @@ var headersNeverForwarded = map[string]struct{}{
 	"Accept-Encoding": {},
 }
 
-// Execute forwards one non-streaming request to the DeepSeek endpoint for the
-// client's protocol surface. The body goes upstream unchanged except for the
-// model name; DeepSeek is stateless across all three surfaces.
-func (p *Plugin) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
+// upstreamCall is everything a request needs before it goes to DeepSeek: which
+// endpoint, the client's protocol, and the body/headers to send.
+type upstreamCall struct {
+	endpoint string
+	format   string
+	headers  http.Header
+	body     []byte
+}
+
+// prepareCall resolves the endpoint, rewrites the model name, and attaches the
+// host-managed credential. Both the streaming and non-streaming paths share it.
+func (p *Plugin) prepareCall(req pluginapi.ExecutorRequest) (upstreamCall, error) {
 	endpoint, err := endpointForFormat(req.SourceFormat)
 	if err != nil {
-		return pluginapi.ExecutorResponse{}, err
+		return upstreamCall{}, err
 	}
 	upstreamModel, err := upstreamModelName(req.Model)
 	if err != nil {
-		return pluginapi.ExecutorResponse{}, err
+		return upstreamCall{}, err
 	}
 	apiKey, err := credentialAPIKey(req.StorageJSON)
 	if err != nil {
-		return pluginapi.ExecutorResponse{}, err
+		return upstreamCall{}, err
 	}
 	body, err := sjson.SetBytes(req.Payload, "model", upstreamModel)
 	if err != nil {
-		return pluginapi.ExecutorResponse{}, fmt.Errorf("executor.execute: rewrite model: %w", err)
+		return upstreamCall{}, fmt.Errorf("executor: rewrite model: %w", err)
 	}
 
 	headers := forwardedHeaders(req.Headers)
 	headers.Set("Authorization", "Bearer "+apiKey)
 
+	return upstreamCall{
+		endpoint: endpoint,
+		format:   strings.TrimSpace(req.SourceFormat),
+		headers:  headers,
+		body:     body,
+	}, nil
+}
+
+// Execute forwards one non-streaming request to the DeepSeek endpoint for the
+// client's protocol surface. The body goes upstream unchanged except for the
+// model name; DeepSeek is stateless across all three surfaces.
+func (p *Plugin) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
+	call, err := p.prepareCall(req)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+
 	upstream, err := p.bridge.Do(ctx, pluginapi.HTTPRequest{
 		Method:  http.MethodPost,
-		URL:     endpoint,
-		Headers: headers,
-		Body:    body,
+		URL:     call.endpoint,
+		Headers: call.headers,
+		Body:    call.body,
 	})
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, fmt.Errorf("executor.execute: %w", err)
@@ -87,9 +112,19 @@ func (p *Plugin) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (pl
 type upstreamError struct {
 	statusCode int
 	body       []byte
+	// cause explains the failure when the upstream sent no usable body.
+	cause error
 }
 
-func (e *upstreamError) Error() string { return string(e.body) }
+func (e *upstreamError) Error() string {
+	if len(e.body) > 0 {
+		return string(e.body)
+	}
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return http.StatusText(e.statusCode)
+}
 
 func (e *upstreamError) StatusCode() int { return e.statusCode }
 
