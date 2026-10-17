@@ -17,7 +17,7 @@ _Avoid_: 翻译、适配、转换层
 _Avoid_: 后端、通道
 
 **reasoning 回放**：
-带 `tools` 的 thinking 会话里，历史所有轮的 `reasoning_content` 必须原样回传上游，漏一轮就 400。不带 `tools` 时上游会忽略它。这是协议对齐直通要保护的首要事实。
+`chat-completions` 协议面上，带 `tools` 的 thinking 会话要求历史所有轮的 `reasoning_content` 原样回传，漏一轮就 400；不带 `tools` 时上游会忽略它。这是协议对齐直通要保护的首要事实。实测 `anthropic` 协议面不施加这条约束，所以「没有 400」不能当作保真的证据，保真只能由字节比对证明。
 _Avoid_: 上下文恢复、思维链传递
 
 **凭证**：

@@ -151,6 +151,11 @@ func TestStreamTreatsEachProtocolTerminatorAsComplete(t *testing.T) {
 				t.Fatalf("frames = %d, want %d: a normally terminated stream must not gain a failure frame (%q)",
 					len(got), len(tc.frames), got)
 			}
+			for i := range tc.frames {
+				if got[i] != tc.frames[i] {
+					t.Errorf("frame %d = %q, want the upstream frame untouched", i, got[i])
+				}
+			}
 		})
 	}
 }

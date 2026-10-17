@@ -3,12 +3,46 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
+
+// fakeSink records stream chunks instead of pushing them to a host.
+type fakeSink struct {
+	mu     sync.Mutex
+	emits  []pluginapi.ExecutorStreamChunk
+	closed []string
+	err    error
+}
+
+func (f *fakeSink) Emit(_ string, chunk pluginapi.ExecutorStreamChunk) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.emits = append(f.emits, chunk)
+	return nil
+}
+
+func (f *fakeSink) Close(streamID, errMessage string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, streamID+"|"+errMessage)
+	return nil
+}
+
+func (f *fakeSink) snapshot() ([]pluginapi.ExecutorStreamChunk, []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pluginapi.ExecutorStreamChunk(nil), f.emits...), append([]string(nil), f.closed...)
+}
 
 // testBridge satisfies the host bridge without touching the host process.
 type testBridge struct{}
@@ -41,7 +75,7 @@ func decodeEnvelope(t *testing.T, raw []byte) envelope {
 }
 
 func TestRegisterReturnsCapabilityDeclaration(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	raw, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{"config_yaml":""}`))
 	if err != nil {
 		t.Fatalf("handle(register) error = %v", err)
@@ -74,7 +108,7 @@ func TestRegisterReturnsCapabilityDeclaration(t *testing.T) {
 }
 
 func TestRegisterRejectsUnparseableConfig(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	payload, err := json.Marshal(lifecycleRequest{ConfigYAML: []byte("models: [")})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
@@ -96,7 +130,7 @@ func TestRegisterRejectsUnparseableConfig(t *testing.T) {
 }
 
 func TestCallsBeforeRegisterAreRejected(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	raw, err := srv.handle(pluginabi.MethodModelStatic, nil)
 	if err != nil {
 		t.Fatalf("handle(model.static) error = %v", err)
@@ -108,7 +142,7 @@ func TestCallsBeforeRegisterAreRejected(t *testing.T) {
 }
 
 func TestIdentifierAndStaticModelsAfterRegister(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -141,7 +175,7 @@ func TestIdentifierAndStaticModelsAfterRegister(t *testing.T) {
 }
 
 func TestUnbuiltCapabilityReturnsNotImplementedCode(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -156,7 +190,7 @@ func TestUnbuiltCapabilityReturnsNotImplementedCode(t *testing.T) {
 }
 
 func TestUnknownMethodIsReported(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -171,7 +205,7 @@ func TestUnknownMethodIsReported(t *testing.T) {
 }
 
 func TestManagementRegisterSerialisesRoutesWithoutHandlers(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -201,7 +235,7 @@ func TestManagementRegisterSerialisesRoutesWithoutHandlers(t *testing.T) {
 }
 
 func TestManagementHandleDispatchesToListKeys(t *testing.T) {
-	srv := newServer(testBridge{})
+	srv := newServer(testBridge{}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -242,7 +276,7 @@ func (b statusBridge) Do(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTP
 
 func TestUpstreamStatusSurvivesTheErrorEnvelope(t *testing.T) {
 	const body = `{"error":{"message":"slow down","type":"rate_limit"}}`
-	srv := newServer(statusBridge{status: 429, body: body})
+	srv := newServer(statusBridge{status: 429, body: body}, &fakeSink{})
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -271,5 +305,144 @@ func TestUpstreamStatusSurvivesTheErrorEnvelope(t *testing.T) {
 	}
 	if env.Error.Message != body {
 		t.Errorf("message = %q, want the upstream body preserved", env.Error.Message)
+	}
+}
+
+// streamBridge serves one fixed upstream chunk sequence.
+type streamBridge struct {
+	testBridge
+	frames []string
+}
+
+func (b streamBridge) DoStream(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {
+	chunks := make(chan pluginapi.HTTPStreamChunk, len(b.frames))
+	for _, frame := range b.frames {
+		chunks <- pluginapi.HTTPStreamChunk{Payload: []byte(frame)}
+	}
+	close(chunks)
+	return pluginapi.HTTPStreamResponse{StatusCode: 200, Chunks: chunks}, nil
+}
+
+func TestExecutorExecuteStreamPushesChunksThroughTheSink(t *testing.T) {
+	frames := []string{"event: response.created\ndata: {}\n\n", "event: response.completed\ndata: {}\n\n"}
+	sink := &fakeSink{}
+	srv := newServer(streamBridge{frames: frames}, sink)
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	request := streamExecutorRequest{
+		ExecutorRequest: pluginapi.ExecutorRequest{
+			Model:        "deepseek-cpa/deepseek-v4-pro",
+			Format:       "openai-response",
+			SourceFormat: "openai-response",
+			Stream:       true,
+			Payload:      []byte(`{"model":"deepseek-cpa/deepseek-v4-pro","stream":true}`),
+			StorageJSON:  []byte(`{"type":"deepseek-cpa","api_key":"sk-x"}`),
+		},
+		StreamID: "stream-1",
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	raw, err := srv.handle(pluginabi.MethodExecutorExecuteStream, payload)
+	if err != nil {
+		t.Fatalf("handle(executor.execute_stream) error = %v", err)
+	}
+	env := decodeEnvelope(t, raw)
+	if !env.OK {
+		t.Fatalf("ok = false, error = %+v", env.Error)
+	}
+
+	// The response must not try to carry the chunk channel.
+	var headers streamHeaders
+	if err := json.Unmarshal(env.Result, &headers); err != nil {
+		t.Fatalf("unmarshal stream response: %v", err)
+	}
+
+	// Chunks are pushed asynchronously; wait for the close that follows them.
+	emits, closed := waitForClose(t, sink)
+	if len(emits) != len(frames) {
+		t.Fatalf("emitted %d chunks, want %d", len(emits), len(frames))
+	}
+	for i, frame := range frames {
+		if string(emits[i].Payload) != frame {
+			t.Errorf("chunk %d = %q, want %q", i, emits[i].Payload, frame)
+		}
+	}
+	if closed != "stream-1|" {
+		t.Errorf("closed = %q, want stream-1 with no error", closed)
+	}
+}
+
+func TestExecutorExecuteStreamRequiresAStreamID(t *testing.T) {
+	srv := newServer(testBridge{}, &fakeSink{})
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	request := streamExecutorRequest{
+		ExecutorRequest: pluginapi.ExecutorRequest{
+			Model:        "deepseek-cpa/deepseek-v4-pro",
+			SourceFormat: "openai-response",
+			Payload:      []byte(`{"model":"deepseek-cpa/deepseek-v4-pro"}`),
+			StorageJSON:  []byte(`{"type":"deepseek-cpa","api_key":"sk-x"}`),
+		},
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	raw, err := srv.handle(pluginabi.MethodExecutorExecuteStream, payload)
+	if err != nil {
+		t.Fatalf("handle error = %v", err)
+	}
+	env := decodeEnvelope(t, raw)
+	if env.OK || env.Error == nil {
+		t.Fatalf("envelope = %+v, want an error for a missing stream id", env)
+	}
+}
+
+func TestExecutorExecuteStreamClosesWithErrorWhenTheHostRejectsChunks(t *testing.T) {
+	sink := &fakeSink{err: errors.New("host stream gone")}
+	srv := newServer(streamBridge{frames: []string{"frame"}}, sink)
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	request := streamExecutorRequest{
+		ExecutorRequest: pluginapi.ExecutorRequest{
+			Model:        "deepseek-cpa/deepseek-v4-pro",
+			SourceFormat: "openai-response",
+			Payload:      []byte(`{"model":"deepseek-cpa/deepseek-v4-pro"}`),
+			StorageJSON:  []byte(`{"type":"deepseek-cpa","api_key":"sk-x"}`),
+		},
+		StreamID: "stream-2",
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if _, err := srv.handle(pluginabi.MethodExecutorExecuteStream, payload); err != nil {
+		t.Fatalf("handle error = %v", err)
+	}
+	_, closed := waitForClose(t, sink)
+	if !strings.Contains(closed, "host stream gone") {
+		t.Errorf("closed = %q, want it to carry the sink error", closed)
+	}
+}
+
+// waitForClose waits for a stream to be closed and returns what was emitted.
+func waitForClose(t *testing.T, sink *fakeSink) ([]pluginapi.ExecutorStreamChunk, string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		emits, closed := sink.snapshot()
+		if len(closed) > 0 {
+			return emits, closed[0]
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stream was never closed")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

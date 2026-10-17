@@ -248,3 +248,45 @@ func TestExecutePropagatesTransportFailure(t *testing.T) {
 		t.Fatalf("Execute() error = %v, want the transport error", err)
 	}
 }
+
+// claudeCodePayload is the shape Claude Code sends on a second turn: thinking
+// blocks and tool_use/tool_result history. A client resends that history on
+// every turn, so the plugin must forward it byte for byte -- dropping a block
+// would change the conversation the model sees.
+const claudeCodePayload = `{"model":"deepseek-cpa/deepseek-v4-pro","max_tokens":4096,
+ "system":[{"type":"text","text":"You are Claude Code"}],
+ "thinking":{"type":"enabled","budget_tokens":4096},
+ "tools":[{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}],
+ "messages":[
+  {"role":"user","content":[{"type":"text","text":"read a.txt"}]},
+  {"role":"assistant","content":[
+    {"type":"thinking","thinking":"I should read the file first.","signature":""},
+    {"type":"text","text":"Reading it."},
+    {"type":"tool_use","id":"toolu_01","name":"Read","input":{"path":"a.txt"}}]},
+  {"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"hello"}]}]}`
+
+func TestExecuteReplaysAnthropicToolHistoryVerbatim(t *testing.T) {
+	bridge := &fakeBridge{doResponse: pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{}`)}}
+	plugin := newManagementPlugin(t, bridge)
+
+	req := executeRequest(Provider+"/deepseek-v4-pro", claudeCodePayload, formatAnthropic)
+	req.Headers = http.Header{"Anthropic-Version": {"2023-06-01"}}
+
+	if _, err := plugin.Execute(context.Background(), req); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	sent := bridge.requests[0]
+	if sent.URL != "https://api.deepseek.com/anthropic/v1/messages" {
+		t.Errorf("URL = %q, want the anthropic endpoint", sent.URL)
+	}
+	want := strings.Replace(claudeCodePayload, Provider+"/deepseek-v4-pro", "deepseek-v4-pro", 1)
+	if string(sent.Body) != want {
+		t.Errorf("upstream body changed.\ngot:  %s\nwant: %s", sent.Body, want)
+	}
+	if got := sent.Headers.Get("Anthropic-Version"); got != "2023-06-01" {
+		t.Errorf("Anthropic-Version = %q, want the client header forwarded", got)
+	}
+	if !strings.Contains(string(sent.Body), `"type":"thinking"`) || !strings.Contains(string(sent.Body), `"type":"tool_result"`) {
+		t.Error("thinking/tool history was dropped from the forwarded body")
+	}
+}

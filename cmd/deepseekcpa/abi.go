@@ -71,7 +71,7 @@ import (
 )
 
 // theServer is the single RPC dispatcher for this dynamic library instance.
-var theServer = newServer(cgoBridge{})
+var theServer = newServer(cgoBridge{}, cgoStreamSink{})
 
 func main() {}
 
@@ -133,6 +133,45 @@ func writeResponse(response *C.cliproxy_buffer, raw []byte) {
 	}
 	response.ptr = ptr
 	response.len = C.size_t(len(raw))
+}
+
+// cgoStreamSink pushes executor stream chunks to the host's stream bridge.
+type cgoStreamSink struct{}
+
+func (cgoStreamSink) Emit(streamID string, chunk pluginapi.ExecutorStreamChunk) error {
+	payload, err := json.Marshal(streamEmitRequest{StreamID: streamID, Payload: chunk.Payload, Error: errText(chunk.Err)})
+	if err != nil {
+		return fmt.Errorf("encode stream emit request: %w", err)
+	}
+	_, err = callHost(pluginabi.MethodHostStreamEmit, payload)
+	return err
+}
+
+func (cgoStreamSink) Close(streamID, errMessage string) error {
+	payload, err := json.Marshal(streamCloseRequest{StreamID: streamID, Error: errMessage})
+	if err != nil {
+		return fmt.Errorf("encode stream close request: %w", err)
+	}
+	_, err = callHost(pluginabi.MethodHostStreamClose, payload)
+	return err
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+type streamEmitRequest struct {
+	StreamID string `json:"stream_id"`
+	Payload  []byte `json:"payload,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type streamCloseRequest struct {
+	StreamID string `json:"stream_id"`
+	Error    string `json:"error,omitempty"`
 }
 
 // cgoBridge implements deepseekcpa.HostBridge over the host function table.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
@@ -93,17 +94,26 @@ type managementHandleRequest struct {
 	HostCallbackID string `json:"host_callback_id,omitempty"`
 }
 
+// streamSink is how executor stream chunks reach the host. The host opens a
+// stream before calling execute_stream and expects chunks through callbacks, so
+// the response itself carries headers only.
+type streamSink interface {
+	Emit(streamID string, chunk pluginapi.ExecutorStreamChunk) error
+	Close(streamID, errMessage string) error
+}
+
 // server holds the plugin instance the host registered and dispatches RPC
 // methods to it.
 type server struct {
 	bridge deepseekcpa.HostBridge
+	stream streamSink
 
 	mu       sync.Mutex
 	instance *deepseekcpa.Plugin
 }
 
-func newServer(bridge deepseekcpa.HostBridge) *server {
-	return &server{bridge: bridge}
+func newServer(bridge deepseekcpa.HostBridge, stream streamSink) *server {
+	return &server{bridge: bridge, stream: stream}
 }
 
 // handle turns one RPC method plus its raw payload into an envelope. Protocol
@@ -152,8 +162,7 @@ func (s *server) handle(method string, payload []byte) ([]byte, error) {
 		var req pluginapi.ExecutorRequest
 		return decodeInto(payload, &req, func() (any, error) { return instance.Execute(ctx, req) })
 	case pluginabi.MethodExecutorExecuteStream:
-		var req pluginapi.ExecutorRequest
-		return decodeInto(payload, &req, func() (any, error) { return instance.ExecuteStream(ctx, req) })
+		return s.executorExecuteStream(ctx, instance, payload)
 	case pluginabi.MethodExecutorCountTokens:
 		var req pluginapi.ExecutorRequest
 		return decodeInto(payload, &req, func() (any, error) { return instance.CountTokens(ctx, req) })
@@ -184,6 +193,59 @@ func (s *server) handle(method string, payload []byte) ([]byte, error) {
 	default:
 		return errorEnvelope(codeUnknownMethod, "unknown method: "+method), nil
 	}
+}
+
+// executorExecuteStream starts a streaming execution and hands the chunk stream
+// to the host through the stream sink. The RPC response only carries headers:
+// the host cannot receive a channel.
+func (s *server) executorExecuteStream(ctx context.Context, instance *deepseekcpa.Plugin, payload []byte) ([]byte, error) {
+	var req streamExecutorRequest
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("decode stream request: %w", err)
+		}
+	}
+	if req.StreamID == "" {
+		return errorEnvelope(codeInternal, "executor.execute_stream: host supplied no stream id"), nil
+	}
+
+	response, err := instance.ExecuteStream(ctx, req.ExecutorRequest)
+	if err != nil {
+		return errorEnvelopeFor(err), nil
+	}
+	go s.pumpStream(ctx, req.StreamID, response.Chunks)
+	return okEnvelope(streamHeaders{Headers: response.Headers})
+}
+
+// pumpStream forwards every chunk to the host and closes the stream exactly
+// once, including when the host stops accepting chunks.
+func (s *server) pumpStream(ctx context.Context, streamID string, chunks <-chan pluginapi.ExecutorStreamChunk) {
+	closeStream := func(errMessage string) {
+		if err := s.stream.Close(streamID, errMessage); err != nil {
+			// The stream is already gone, so the host log is the last place this
+			// can surface; if the log call fails too there is nothing left to
+			// report to.
+			_ = s.bridge.Log(ctx, "warn", "stream close failed: "+err.Error())
+		}
+	}
+	for chunk := range chunks {
+		if err := s.stream.Emit(streamID, chunk); err != nil {
+			closeStream(err.Error())
+			return
+		}
+	}
+	closeStream("")
+}
+
+type streamExecutorRequest struct {
+	pluginapi.ExecutorRequest
+	StreamID string `json:"stream_id"`
+}
+
+// streamHeaders is the execute_stream response: no chunks, they travel through
+// the sink.
+type streamHeaders struct {
+	Headers http.Header `json:"Headers,omitempty"`
 }
 
 func (s *server) register(payload []byte) ([]byte, error) {
