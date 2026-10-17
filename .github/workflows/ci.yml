@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - name: go test
+        run: go test ./...
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build developer artefact
+        run: ./build.sh
+      - name: ABI smoke test
+        run: python3 test/abi_smoke.py dist/deepseek-cpa.linux.amd64
+      - name: package release artefact
+        run: ./scripts/package-release.sh 0.0.0-ci
+      - name: check artefacts against the plugin-store contract
+        run: python3 test/package_check.py

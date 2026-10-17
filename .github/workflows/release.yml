@@ -1,0 +1,83 @@
+name: release
+
+# Cut a release by pushing a tag: git tag v0.1.0 && git push origin v0.1.0
+#
+# The platform matrix is read from platforms.txt, the same file
+# scripts/package-release.sh and build.sh validate against, so the pipeline and
+# the local scripts cannot disagree about which platforms exist.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.parse.outputs.include }}
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: parse
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          include="$(python3 - <<'PY'
+          import json
+
+          entries = []
+          for line in open("platforms.txt"):
+              line = line.split("#", 1)[0].strip()
+              if not line:
+                  continue
+              target, runner = line.split()[:2]
+              entries.append({"target": target, "runner": runner})
+          print(json.dumps(entries))
+          PY
+          )"
+          {
+            echo "include=${include}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build and package
+        run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}"
+      - name: check artefacts against the plugin-store contract
+        run: python3 test/package_check.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ strategy.job-index }}
+          path: dist/*.zip
+
+  publish:
+    needs: [matrix, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: write checksums
+        run: |
+          cd dist
+          sha256sum *.zip > checksums.txt
+          cat checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/checksums.txt
