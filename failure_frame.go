@@ -33,15 +33,14 @@ func failureFrame(format string, cause error) []byte {
 			},
 		})
 	case formatChat:
-		// Chat completions has no error event: the stream carries an error
-		// payload and then the usual terminator.
-		body := jsonData(map[string]any{
+		// Chat chunks are bare payloads: the host wraps this in "data: " and
+		// appends its own [DONE], so the error must not carry either.
+		return bareJSON(map[string]any{
 			"error": map[string]any{
 				"type":    "server_error",
 				"message": message,
 			},
 		})
-		return append(body, []byte("data: [DONE]\n\n")...)
 	default:
 		panic(fmt.Sprintf("failureFrame: no failure framing for protocol %q", format))
 	}
@@ -55,6 +54,15 @@ func sseEvent(event string, payload map[string]any) []byte {
 	out = append(out, '\n')
 	out = append(out, jsonData(payload)...)
 	return out
+}
+
+// bareJSON renders one chat chunk payload without SSE framing.
+func bareJSON(payload map[string]any) []byte {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		panic("bareJSON: marshaling a map of scalars cannot fail: " + err.Error())
+	}
+	return raw
 }
 
 func jsonData(payload map[string]any) []byte {

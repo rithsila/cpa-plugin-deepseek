@@ -115,12 +115,28 @@ func (p *Plugin) forwardChunks(ctx context.Context, source <-chan pluginapi.HTTP
 	go func() {
 		defer close(out)
 		tracker := newTerminalTracker(format)
+		unframer := &chatUnframer{}
 		for chunk := range source {
 			if chunk.Err != nil {
 				// A broken upstream stream never produced its own terminal
 				// event, so the client gets ours instead of a silent truncation.
 				sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: failureFrame(format, chunk.Err)})
 				tracker.seen = true
+				continue
+			}
+			// Chat chunks travel as bare payloads because the host frames them;
+			// the other surfaces forward complete SSE frames.
+			if format == formatChat {
+				payloads, done := unframer.push(chunk.Payload)
+				if done {
+					tracker.seen = true
+				}
+				for _, payload := range payloads {
+					if !sendChunk(ctx, out, pluginapi.ExecutorStreamChunk{Payload: payload}) {
+						drainSource(source)
+						return
+					}
+				}
 				continue
 			}
 			tracker.observe(chunk.Payload)

@@ -71,7 +71,12 @@ thinking 参数由客户端按它所用协议的字段写入，插件原样透�
 
 **错误语义。** 上游的 401、402、429 与其它状态码原样作为执行结果透出，executor 内部不重试、不改写状态码，让宿主调度器据此切换凭证。仅在需要携带宿主可识别的错误信息时才附加错误体，不吞掉原始状态。
 
-**流式处理。** 上游 SSE 帧逐字节原样上交，插件不改写、不重组上游帧。宿主不替执行器补帧——执行器交出的 chunk 就是发给客户端的完整 SSE 帧，因此插件合成终态错误事件时必须自己写 `event:` / `data:` 前缀，这是唯一由插件作帧的场景。流开始后上游异常终止时按协议发终态错误事件；未收到上游终态事件就结束的流，一律按失败处理，不得补发正常终态。终态按各协议自己的终止帧判断：responses 看 `response.completed` / `response.incomplete` / `response.failed`，anthropic 看 `message_stop` 与 `error`，chat 看 `[DONE]`；判定只读事件的类型字段，不做文本子串匹配，避免把正文里出现的同名文本当成流结束。
+**流式处理。** 谁给 chunk 作帧取决于协议面，三者不同：
+
+- `responses` 与 `anthropic`：宿主把执行器交出的字节原样转发，所以 chunk 必须是完整 SSE 帧；插件合成终态错误事件时自己写 `event:` / `data:` 前缀。
+- `chat-completions`：宿主自己写 `data: <payload>` 并自己补上 `[DONE]`，所以 chunk 必须是**裸 JSON 载荷**；插件把上游 SSE 拆成单个事件再交出，丢掉上游的 `[DONE]`，合成的失败载荷同样不带前缀也不带 `[DONE]`。把带前缀的整帧交给宿主会产生 `data: data:` 双重前缀。
+
+流开始后上游异常终止时按协议发终态错误事件；未收到上游终态事件就结束的流，一律按失败处理，不得补发正常终态。终态按各协议自己的终止帧判断：responses 看 `response.completed` / `response.incomplete` / `response.failed`，anthropic 看 `message_stop` 与 `error`，chat 看 `[DONE]`；判定只读事件的类型字段，不做文本子串匹配，避免把正文里出现的同名文本当成流结束。
 
 **用量观测。** 实现 `usage_plugin`，把宿主投递的用量记录落成结构化日志。不存储、不聚合、不提供看板。
 

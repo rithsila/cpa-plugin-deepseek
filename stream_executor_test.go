@@ -113,15 +113,21 @@ func TestStreamIgnoresTerminalNamesInsideDeltaText(t *testing.T) {
 }
 
 func TestStreamTreatsEachProtocolTerminatorAsComplete(t *testing.T) {
+	// Each surface terminates differently, and only chat is re-framed by the
+	// host: there the executor hands over bare payloads and drops the upstream
+	// [DONE], because the host writes its own.
 	cases := []struct {
-		name   string
-		format string
-		frames []string
+		name         string
+		format       string
+		frames       []string
+		wantPayloads []string
 	}{
 		{
 			name:   "responses",
 			format: formatResponses,
 			frames: []string{"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+				"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"},
+			wantPayloads: []string{"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
 				"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"},
 		},
 		{
@@ -129,12 +135,15 @@ func TestStreamTreatsEachProtocolTerminatorAsComplete(t *testing.T) {
 			format: formatAnthropic,
 			frames: []string{"event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
 				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"},
+			wantPayloads: []string{"event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"},
 		},
 		{
 			name:   "chat",
 			format: formatChat,
 			frames: []string{"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
 				"data: [DONE]\n\n"},
+			wantPayloads: []string{"{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}"},
 		},
 	}
 	for _, tc := range cases {
@@ -147,20 +156,53 @@ func TestStreamTreatsEachProtocolTerminatorAsComplete(t *testing.T) {
 				t.Fatalf("ExecuteStream() error = %v", err)
 			}
 			got := collect(t, resp.Chunks)
-			if len(got) != len(tc.frames) {
-				t.Fatalf("frames = %d, want %d: a normally terminated stream must not gain a failure frame (%q)",
-					len(got), len(tc.frames), got)
+			if len(got) != len(tc.wantPayloads) {
+				t.Fatalf("payloads = %d, want %d: a normally terminated stream must not gain a failure chunk (%q)",
+					len(got), len(tc.wantPayloads), got)
 			}
-			for i := range tc.frames {
-				if got[i] != tc.frames[i] {
-					t.Errorf("frame %d = %q, want the upstream frame untouched", i, got[i])
+			for i := range tc.wantPayloads {
+				if got[i] != tc.wantPayloads[i] {
+					t.Errorf("payload %d = %q, want %q", i, got[i], tc.wantPayloads[i])
 				}
 			}
 		})
 	}
 }
 
-func TestStreamTruncatedChatEndsWithErrorAndDone(t *testing.T) {
+func TestStreamChatSplitsMultipleEventsOutOfOneChunk(t *testing.T) {
+	// The host frames one payload per chunk, so a chunk carrying two upstream
+	// events has to become two payloads; forwarding the raw bytes would yield a
+	// single malformed frame.
+	bridge := &fakeBridge{stream: streamOf(200, "data: {\"n\":1}\n\ndata: {\"n\":2}\n\ndata: [DONE]\n\n")}
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.ExecuteStream(context.Background(),
+		streamRequest(Provider+"/deepseek-v4-pro", `{"model":"x","stream":true}`, formatChat))
+	if err != nil {
+		t.Fatalf("ExecuteStream() error = %v", err)
+	}
+	got := collect(t, resp.Chunks)
+	if len(got) != 2 || got[0] != `{"n":1}` || got[1] != `{"n":2}` {
+		t.Fatalf("payloads = %q, want two bare JSON payloads", got)
+	}
+}
+
+func TestStreamChatHandlesAnEventSplitAcrossChunks(t *testing.T) {
+	bridge := &fakeBridge{stream: streamOf(200, "data: {\"n\":", "1}\n\ndata: [DONE]\n\n")}
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.ExecuteStream(context.Background(),
+		streamRequest(Provider+"/deepseek-v4-pro", `{"model":"x","stream":true}`, formatChat))
+	if err != nil {
+		t.Fatalf("ExecuteStream() error = %v", err)
+	}
+	got := collect(t, resp.Chunks)
+	if len(got) != 1 || got[0] != `{"n":1}` {
+		t.Fatalf("payloads = %q, want the reassembled bare payload", got)
+	}
+}
+
+func TestStreamTruncatedChatYieldsABareErrorPayload(t *testing.T) {
 	bridge := &fakeBridge{stream: streamOf(200, "data: {\"choices\":[]}\n\n")}
 	plugin := newManagementPlugin(t, bridge)
 
@@ -171,8 +213,14 @@ func TestStreamTruncatedChatEndsWithErrorAndDone(t *testing.T) {
 	}
 	got := collect(t, resp.Chunks)
 	last := got[len(got)-1]
-	if !strings.Contains(last, `"error"`) || !strings.HasSuffix(last, "data: [DONE]\n\n") {
-		t.Errorf("last frame = %q, want an error chunk followed by [DONE]", last)
+	if strings.HasPrefix(last, "data:") {
+		t.Errorf("payload = %q, want no SSE prefix: the host frames chat chunks", last)
+	}
+	if strings.Contains(last, "[DONE]") {
+		t.Errorf("payload = %q, want no [DONE]: the host appends its own", last)
+	}
+	if !strings.Contains(last, `"error"`) {
+		t.Errorf("payload = %q, want an error payload", last)
 	}
 }
 
