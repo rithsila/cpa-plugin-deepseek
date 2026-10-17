@@ -14,7 +14,7 @@ import (
 )
 
 // pluginVersion is the release version reported at registration.
-var pluginVersion = "0.4.0"
+var pluginVersion = "0.4.1"
 
 // Version returns the plugin release version reported to the host.
 func Version() string { return pluginVersion }
@@ -48,7 +48,7 @@ func Build(configYAML []byte, bridge HostBridge) (pluginapi.Plugin, *Plugin, err
 		Metadata: pluginapi.Metadata{
 			Name:             Provider,
 			Version:          pluginVersion,
-			Author:           "ahoo",
+			Author:           "xspeed1989",
 			GitHubRepository: "https://github.com/xspeed1989/cpa-plugin-deepseek",
 		},
 		Capabilities: pluginapi.Capabilities{
