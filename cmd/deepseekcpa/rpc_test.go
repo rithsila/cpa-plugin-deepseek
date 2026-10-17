@@ -235,8 +235,11 @@ func TestManagementRegisterSerialisesRoutesWithoutHandlers(t *testing.T) {
 			t.Errorf("unexpected route path %q", route.Path)
 		}
 	}
-	if len(reg.Resources) != 0 {
-		t.Errorf("resources = %d, want none", len(reg.Resources))
+	if len(reg.Resources) != 1 || reg.Resources[0].Path != "/credentials" {
+		t.Errorf("resources = %+v, want the keys page", reg.Resources)
+	}
+	if reg.Resources[0].Menu == "" {
+		t.Error("resource has no menu label, so the management panel will not link it")
 	}
 }
 

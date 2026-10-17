@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -244,8 +245,11 @@ func TestRegisterManagementDeclaresKeyRoutes(t *testing.T) {
 			t.Errorf("route %s has no handler", route.Method)
 		}
 	}
-	if len(resp.Resources) != 0 {
-		t.Errorf("Resources = %d, want none: keys must sit behind the management key", len(resp.Resources))
+	if len(resp.Resources) != 1 || resp.Resources[0].Path != keysResourcePath {
+		t.Fatalf("Resources = %+v, want the keys page", resp.Resources)
+	}
+	if resp.Resources[0].Handler == nil {
+		t.Error("resource has no handler")
 	}
 }
 
@@ -456,5 +460,47 @@ func TestUnknownManagementRouteIsNotFound(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("StatusCode = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestKeysPageIsServedWithoutLeakingAnything(t *testing.T) {
+	bridge := &fakeBridge{}
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.HandleManagement(context.Background(), pluginapi.ManagementRequest{
+		Method: http.MethodGet,
+		Path:   "/v0/resource" + resourceSubPath(keysResourcePath),
+	})
+	if err != nil {
+		t.Fatalf("HandleManagement() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Headers.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", got)
+	}
+
+	page := string(resp.Body)
+	for _, want := range []string{
+		`PLUGIN = "deepseek-cpa"`,   // the plugin whose routes it calls
+		`"/v0/management/plugins/"`, // the authenticated API base
+		`id="apikey"`,               // add form
+		`id="mgmt"`,                 // management key field
+		`id="keys"`,                 // list container
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page does not contain %q", want)
+		}
+	}
+	// No credential material: the only "sk-" allowed is the input placeholder.
+	if strings.Contains(page, `"api_key":"`) {
+		t.Error("page embeds a credential payload")
+	}
+	if secret := regexp.MustCompile(`sk-[A-Za-z0-9]{16,}`).FindString(page); secret != "" {
+		t.Errorf("page embeds something shaped like a key: %q", secret)
+	}
+	if len(bridge.requests) != 0 {
+		t.Error("serving the page touched the network")
 	}
 }

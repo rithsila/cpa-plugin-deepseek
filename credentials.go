@@ -70,6 +70,9 @@ func (p *Plugin) RegisterManagement(context.Context, pluginapi.ManagementRegistr
 			{Method: http.MethodDelete, Path: keysRoutePath, Description: "Remove a DeepSeek credential by name.", Handler: handler},
 			{Method: http.MethodPost, Path: modelsRefreshRoutePath, Description: "Re-probe the DeepSeek model list.", Handler: handler},
 		},
+		Resources: []pluginapi.ResourceRoute{
+			{Path: keysResourcePath, Menu: "DeepSeek Keys", Description: "Add, list and remove DeepSeek credentials.", Handler: handler},
+		},
 	}, nil
 }
 
@@ -92,11 +95,13 @@ func (p *Plugin) refreshModels(ctx context.Context, method string) (pluginapi.Ma
 
 // managementPrefixes are the API prefixes the host mounts plugin routes under.
 // The host passes the full request path, so the route match has to strip it.
-var managementPrefixes = []string{"/v0/management", "/v8/management"}
+var managementPrefixes = []string{"/v0/management", "/v8/management", "/v0/resource", "/v8/resource"}
 
 // HandleManagement dispatches one Management API request to the key routes.
 func (p *Plugin) HandleManagement(ctx context.Context, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
 	switch managementSubPath(req.Path) {
+	case resourceSubPath(keysResourcePath):
+		return htmlResponse(http.StatusOK, keysPage)
 	case modelsRefreshRoutePath:
 		return p.refreshModels(ctx, req.Method)
 	case keysRoutePath:
@@ -117,6 +122,20 @@ func (p *Plugin) handleKeys(ctx context.Context, req pluginapi.ManagementRequest
 	default:
 		return jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
+}
+
+// resourceSubPath builds the path the host reports for a plugin resource: it
+// mounts resources under /v0/resource/plugins/<pluginID>/.
+func resourceSubPath(path string) string {
+	return "/plugins/" + Provider + path
+}
+
+func htmlResponse(status int, body string) (pluginapi.ManagementResponse, error) {
+	return pluginapi.ManagementResponse{
+		StatusCode: status,
+		Headers:    map[string][]string{"Content-Type": {"text/html; charset=utf-8"}},
+		Body:       []byte(body),
+	}, nil
 }
 
 func managementSubPath(path string) string {

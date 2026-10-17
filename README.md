@@ -57,7 +57,15 @@ curl -s -H "X-Management-Key: <你的管理密钥>" \
 
 ## 管理 DeepSeek 密钥
 
-密钥由宿主托管，通过 Management API 管理。以下路由都需要管理密钥。
+密钥由宿主托管。两种方式：
+
+### 管理面板（推荐）
+
+管理面板 → 插件 → **DeepSeek Keys**（`/v0/resource/plugins/deepseek-cpa/credentials`）。页面里填一次管理密钥（存在该站点的 localStorage），之后可以直接查看、添加、删除密钥。
+
+### 命令行
+
+以下路由都需要管理密钥。
 
 ```bash
 # 新增（同一个 key 重复添加会覆盖同名凭证）
