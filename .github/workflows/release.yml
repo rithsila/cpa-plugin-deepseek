@@ -23,19 +23,17 @@ jobs:
       - id: parse
         run: |
           version="${GITHUB_REF_NAME#v}"
-          include="$(python3 - <<'PY'
-          import json
-
-          entries = []
-          for line in open("platforms.txt"):
-              line = line.split("#", 1)[0].strip()
-              if not line:
-                  continue
-              target, runner = line.split()[:2]
-              entries.append({"target": target, "runner": runner})
-          print(json.dumps(entries))
-          PY
-          )"
+          registry_version="$(python3 -c 'import json; print(json.load(open("registry.json"))["plugins"][0]["version"])')"
+          if [ "$registry_version" != "$version" ]; then
+            echo "registry.json version (${registry_version}) does not match the release tag (${version})" >&2
+            echo "bump registry.json before tagging" >&2
+            exit 1
+          fi
+          # The matrix comes from platforms.txt through the same helper the local
+          # scripts use, so the comment-stripping rule lives in one place.
+          include="$(source scripts/platforms.sh && platforms_entries \
+            | awk '{ printf "{\"target\":\"%s\",\"runner\":\"%s\"}\n", $1, $2 }' \
+            | jq -s -c '.')"
           {
             echo "include=${include}"
             echo "version=${version}"

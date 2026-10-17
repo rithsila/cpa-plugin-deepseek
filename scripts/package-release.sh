@@ -1,40 +1,30 @@
 #!/usr/bin/env bash
-# Packages one release artefact for the current platform.
+# Packages one release artefact for one platform.
 #
 # Output in dist/:
 #   deepseek-cpa_<version>_<goos>_<goarch>.zip  (library at the zip root)
 #   checksums.txt                              (sha256, appended per platform)
 #
-# Usage: scripts/package-release.sh <version>
+# Usage: scripts/package-release.sh <version> [<goos>/<goarch>]
+#
+# The optional target lets one runner build both architectures of its platform,
+# which macOS needs: the arm64 runner also produces the amd64 artefact.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source scripts/platforms.sh
 
 version="${1:?usage: scripts/package-release.sh <version> [<goos>/<goarch>]}"
 plugin_id="deepseek-cpa"
 
-# An explicit target lets one runner build both architectures of its platform,
-# which macOS needs: the arm64 runner also produces the amd64 artefact.
 target="${2:-$(go env GOOS)/$(go env GOARCH)}"
+require_platform "$target"
 export GOOS="${target%%/*}"
 export GOARCH="${target##*/}"
-goos="$GOOS"
-goarch="$GOARCH"
+extension="$(require_library_extension "$GOOS")"
 
-if ! awk '!/^#/ && NF {print $1}' platforms.txt | grep -qx "$target"; then
-  echo "unsupported release platform ${target}; platforms.txt lists:" >&2
-  awk '!/^#/ && NF {print "  " $1}' platforms.txt >&2
-  exit 1
-fi
-
-case "$goos" in
-  linux) extension="so" ;;
-  darwin) extension="dylib" ;;
-  *) echo "no dynamic library extension known for ${goos}" >&2; exit 1 ;;
-esac
-
-stage="dist/stage-${goos}-${goarch}"
-archive="${plugin_id}_${version}_${goos}_${goarch}.zip"
+stage="dist/stage-${GOOS}-${GOARCH}"
+archive="${plugin_id}_${version}_${GOOS}_${GOARCH}.zip"
 
 rm -rf "$stage"
 mkdir -p "$stage" dist
