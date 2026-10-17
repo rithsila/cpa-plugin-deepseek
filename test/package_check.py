@@ -14,7 +14,7 @@ import zipfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLUGIN_ID = "deepseek-cpa"
 REPOSITORY = "https://github.com/xspeed1989/cpa-plugin-deepseek"
-EXTENSIONS = {"linux": "so", "darwin": "dylib", "windows": "dll"}
+EXTENSIONS = {"linux": "so", "freebsd": "so", "darwin": "dylib", "windows": "dll"}
 
 
 def fail(message):
