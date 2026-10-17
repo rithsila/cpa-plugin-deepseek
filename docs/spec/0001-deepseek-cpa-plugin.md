@@ -65,7 +65,12 @@ thinking 参数由客户端按它所用协议的字段写入，插件原样透�
 
 **凭证归属。** 实现 `auth.identifier` 与 `auth.parse`。`auth.login.start`、`auth.login.poll`、`auth.refresh` 显式返回不支持——DeepSeek key 不过期，这三者对它是空活。凭证由管理页经宿主的凭证写入回调产生。这是 ADR-0002 的结论。
 
-**模型公布。** 以 `model.static` 公布，配合 `executor_model_scope: static`。模型列表来自懒探测：注册阶段不联网，用内置默认列表应答；首次真正需要列表时向上游取并缓存；管理页可显式触发刷新。探测结果是列表真相，内置默认只在尚未探测成功时兜底。上游名与客户端可见名之间的差异只由前缀承载。
+**模型公布。** 以 `model.static` 公布，配合 `executor_model_scope: static`。上游名与客户端可见名之间的差异只由前缀承载。
+
+- 插件元数据注册（`plugin.register`）不联网，只校验配置。
+- `model.static` 是列出模型的地方：没有任何凭证时零网络、返回内置默认列表；有凭证时探测上游 `/models` 并缓存结果。探测失败只记录日志并退回内置默认，绝不使注册或请求失败。
+- 探测结果是列表真相。上游没有公布的模型不公布，因而**也不可路由**——宿主只路由已注册的模型。这条代价是真实的：`deepseek-v4-pro[1m]` 实测可用但上游不公布，探测成功后该名字会返回 400 `unknown provider`。这是刻意的取舍，不是缺陷。
+- 管理路由可显式重新探测并更新插件侧列表；宿主在下一次插件重载（重启或改插件配置）后才应用新列表，宿主没有提供主动触发模型重注册的回调。
 
 **thinking 不做插件侧写入。** 不实现 `thinking_applier`。宿主查找 applier 用的是协议格式名（`claude` / `openai` / `codex`），而插件的 applier 以 `thinking.identifier` 注册，两者永不相等，因此本插件的 applier 在这版宿主上不可能被调用；改用原生格式名注册也会被宿主以「与原生 applier 冲突」拒绝。同时宿主不对 `UserDefined` 的插件模型剥离 thinking 字段，客户端的 thinking 参数本来就能原样到达上游。结论：透传已经足够，多写一个不可达的能力面只会增加误导。这是 ADR-0004 的结论，取代 ADR-0003。
 

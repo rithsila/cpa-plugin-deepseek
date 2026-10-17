@@ -7,6 +7,7 @@ package deepseekcpa
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -22,6 +23,9 @@ func Version() string { return pluginVersion }
 // of them so the ABI layer keeps a single pointer.
 type Plugin struct {
 	bridge HostBridge
+
+	modelMu sync.Mutex
+	models  []ModelEntry
 }
 
 // Build validates plugins.configs.deepseek-cpa and describes the plugin to the
@@ -67,15 +71,27 @@ func Build(configYAML []byte, bridge HostBridge) (pluginapi.Plugin, *Plugin, err
 // Identifier returns the provider key handled by every capability.
 func (p *Plugin) Identifier() string { return Provider }
 
-// StaticModels publishes the bootstrap model list under the plugin namespace.
-// It never touches the network; upstream probing replaces the list later.
-func (p *Plugin) StaticModels(context.Context, pluginapi.StaticModelRequest) (pluginapi.ModelResponse, error) {
-	entries := defaultModels()
-	models := make([]pluginapi.ModelInfo, 0, len(entries))
-	for _, entry := range entries {
-		models = append(models, modelInfo(entry))
+// StaticModels publishes the model list under the plugin namespace.
+//
+// A successful probe is the source of truth. Until one succeeds the built-in
+// bootstrap list answers, and a failed probe never fails registration: the
+// plugin must load even when DeepSeek is unreachable or no credential exists
+// yet. The first call has no credential, so a fresh install does no network I/O.
+func (p *Plugin) StaticModels(ctx context.Context, _ pluginapi.StaticModelRequest) (pluginapi.ModelResponse, error) {
+	if cached := p.cachedModels(); len(cached) > 0 {
+		return pluginapi.ModelResponse{Provider: Provider, Models: publishModels(cached)}, nil
 	}
-	return pluginapi.ModelResponse{Provider: Provider, Models: models}, nil
+
+	entries, err := p.probeModels(ctx)
+	if err != nil {
+		// The fallback log is the last diagnostic before the bootstrap list, and
+		// failing registration because the logger failed would break the promise
+		// that a failed probe never blocks the plugin from loading.
+		_ = p.bridge.Log(ctx, "info", "serving bootstrap models: "+err.Error())
+		return pluginapi.ModelResponse{Provider: Provider, Models: publishModels(defaultModels())}, nil
+	}
+	p.setModels(entries)
+	return pluginapi.ModelResponse{Provider: Provider, Models: publishModels(entries)}, nil
 }
 
 // ModelsForAuth is part of the model provider capability but unused: the plugin

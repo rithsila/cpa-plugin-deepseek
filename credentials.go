@@ -20,6 +20,9 @@ import (
 // the handler runs. Method distinguishes list, add, and remove.
 const keysRoutePath = "/plugins/" + Provider + "/keys"
 
+// modelsRefreshRoutePath re-probes the upstream model list on demand.
+const modelsRefreshRoutePath = "/plugins/" + Provider + "/models/refresh"
+
 // credentialTypeField is the credential JSON field that decides which provider
 // owns an auth file. DeepSeek keys carry no other identifying marker.
 const credentialTypeField = "type"
@@ -65,8 +68,26 @@ func (p *Plugin) RegisterManagement(context.Context, pluginapi.ManagementRegistr
 			{Method: http.MethodGet, Path: keysRoutePath, Description: "List DeepSeek credentials (never their keys).", Handler: handler},
 			{Method: http.MethodPost, Path: keysRoutePath, Description: "Add a DeepSeek credential.", Handler: handler},
 			{Method: http.MethodDelete, Path: keysRoutePath, Description: "Remove a DeepSeek credential by name.", Handler: handler},
+			{Method: http.MethodPost, Path: modelsRefreshRoutePath, Description: "Re-probe the DeepSeek model list.", Handler: handler},
 		},
 	}, nil
+}
+
+// refreshModels re-probes upstream and republishes the result.
+func (p *Plugin) refreshModels(ctx context.Context, method string) (pluginapi.ManagementResponse, error) {
+	if method != http.MethodPost {
+		return jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+	entries, err := p.probeModels(ctx)
+	if err != nil {
+		return jsonResponse(http.StatusBadGateway, map[string]string{"error": err.Error()})
+	}
+	p.setModels(entries)
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, Provider+"/"+entry.ID)
+	}
+	return jsonResponse(http.StatusOK, map[string]any{"models": ids})
 }
 
 // managementPrefixes are the API prefixes the host mounts plugin routes under.
@@ -75,9 +96,17 @@ var managementPrefixes = []string{"/v0/management", "/v8/management"}
 
 // HandleManagement dispatches one Management API request to the key routes.
 func (p *Plugin) HandleManagement(ctx context.Context, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
-	if managementSubPath(req.Path) != keysRoutePath {
+	switch managementSubPath(req.Path) {
+	case modelsRefreshRoutePath:
+		return p.refreshModels(ctx, req.Method)
+	case keysRoutePath:
+		return p.handleKeys(ctx, req)
+	default:
 		return jsonResponse(http.StatusNotFound, map[string]string{"error": "unknown route"})
 	}
+}
+
+func (p *Plugin) handleKeys(ctx context.Context, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
 	switch req.Method {
 	case http.MethodGet:
 		return p.listKeys(ctx)

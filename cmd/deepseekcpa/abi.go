@@ -206,6 +206,23 @@ func (cgoBridge) ListAuths(_ context.Context) ([]pluginapi.HostAuthFileEntry, er
 	return listed.Files, nil
 }
 
+// GetAuth fetches one credential payload by auth index.
+func (cgoBridge) GetAuth(_ context.Context, req pluginapi.HostAuthGetRequest) (pluginapi.HostAuthGetResponse, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return pluginapi.HostAuthGetResponse{}, fmt.Errorf("encode auth get request: %w", err)
+	}
+	raw, err := callHost(pluginabi.MethodHostAuthGet, payload)
+	if err != nil {
+		return pluginapi.HostAuthGetResponse{}, err
+	}
+	var response pluginapi.HostAuthGetResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return pluginapi.HostAuthGetResponse{}, fmt.Errorf("decode auth get response: %w", err)
+	}
+	return response, nil
+}
+
 // SaveAuth writes a credential record through the host.
 func (cgoBridge) SaveAuth(_ context.Context, req pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error) {
 	payload, err := json.Marshal(req)

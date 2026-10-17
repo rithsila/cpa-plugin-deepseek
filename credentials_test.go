@@ -25,6 +25,7 @@ type fakeBridge struct {
 	doErr      error
 	stream     pluginapi.HTTPStreamResponse
 	streamErr  error
+	authJSON   map[string][]byte
 }
 
 func (f *fakeBridge) Log(_ context.Context, level, message string) error {
@@ -37,6 +38,14 @@ func (f *fakeBridge) ListAuths(context.Context) ([]pluginapi.HostAuthFileEntry, 
 		return nil, f.listErr
 	}
 	return f.auths, nil
+}
+
+func (f *fakeBridge) GetAuth(_ context.Context, req pluginapi.HostAuthGetRequest) (pluginapi.HostAuthGetResponse, error) {
+	payload, ok := f.authJSON[req.AuthIndex]
+	if !ok {
+		return pluginapi.HostAuthGetResponse{}, errors.New("fake bridge: no such auth")
+	}
+	return pluginapi.HostAuthGetResponse{AuthIndex: req.AuthIndex, JSON: payload}, nil
 }
 
 func (f *fakeBridge) SaveAuth(_ context.Context, req pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error) {
@@ -205,16 +214,17 @@ func TestRegisterManagementDeclaresKeyRoutes(t *testing.T) {
 		t.Fatalf("RegisterManagement() error = %v", err)
 	}
 	want := map[string]string{
-		http.MethodGet:    keysRoutePath,
-		http.MethodPost:   keysRoutePath,
-		http.MethodDelete: keysRoutePath,
+		http.MethodGet + " " + keysRoutePath:           "list keys",
+		http.MethodPost + " " + keysRoutePath:          "add key",
+		http.MethodDelete + " " + keysRoutePath:        "remove key",
+		http.MethodPost + " " + modelsRefreshRoutePath: "refresh models",
 	}
 	if len(resp.Routes) != len(want) {
 		t.Fatalf("routes = %d, want %d", len(resp.Routes), len(want))
 	}
 	for _, route := range resp.Routes {
-		if want[route.Method] != route.Path {
-			t.Errorf("route %s %s, want %s", route.Method, route.Path, want[route.Method])
+		if _, ok := want[route.Method+" "+route.Path]; !ok {
+			t.Errorf("unexpected route %s %s", route.Method, route.Path)
 		}
 		if route.Handler == nil {
 			t.Errorf("route %s has no handler", route.Method)

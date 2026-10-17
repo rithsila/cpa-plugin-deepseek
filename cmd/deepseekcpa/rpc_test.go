@@ -53,6 +53,10 @@ func (testBridge) ListAuths(context.Context) ([]pluginapi.HostAuthFileEntry, err
 	return nil, nil
 }
 
+func (testBridge) GetAuth(context.Context, pluginapi.HostAuthGetRequest) (pluginapi.HostAuthGetResponse, error) {
+	return pluginapi.HostAuthGetResponse{}, nil
+}
+
 func (testBridge) SaveAuth(context.Context, pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error) {
 	return pluginapi.HostAuthSaveResponse{}, nil
 }
@@ -221,12 +225,14 @@ func TestManagementRegisterSerialisesRoutesWithoutHandlers(t *testing.T) {
 	if err := json.Unmarshal(env.Result, &reg); err != nil {
 		t.Fatalf("unmarshal registration: %v", err)
 	}
-	if len(reg.Routes) != 3 {
-		t.Fatalf("routes = %d, want 3", len(reg.Routes))
+	if len(reg.Routes) != 4 {
+		t.Fatalf("routes = %d, want 4", len(reg.Routes))
 	}
 	for _, route := range reg.Routes {
-		if route.Path != "/plugins/deepseek-cpa/keys" {
-			t.Errorf("route path = %q, want the keys route", route.Path)
+		switch route.Path {
+		case "/plugins/deepseek-cpa/keys", "/plugins/deepseek-cpa/models/refresh":
+		default:
+			t.Errorf("unexpected route path %q", route.Path)
 		}
 	}
 	if len(reg.Resources) != 0 {

@@ -25,6 +25,9 @@ type HostBridge interface {
 	Log(ctx context.Context, level, message string) error
 	// ListAuths returns the credential records the host currently knows about.
 	ListAuths(ctx context.Context) ([]pluginapi.HostAuthFileEntry, error)
+	// GetAuth returns one credential payload by its host auth index. The model
+	// probe needs a key and has no other way to reach one.
+	GetAuth(ctx context.Context, req pluginapi.HostAuthGetRequest) (pluginapi.HostAuthGetResponse, error)
 	// SaveAuth writes a credential record through the host.
 	SaveAuth(ctx context.Context, req pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error)
 	// Do performs one non-streaming upstream request through the host client.
