@@ -1,0 +1,9 @@
+# 构建产物
+*.so
+*.dylib
+*.dll
+dist/
+plugins/
+
+# Go
+/vendor/
