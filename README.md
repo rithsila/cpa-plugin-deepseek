@@ -19,15 +19,19 @@ CLIProxyAPI 的 DeepSeek 原生插件。客户端用它自己的协议访问，�
 ## 要求
 
 - CLIProxyAPI v8.0.32（以 `go.mod` 钉住的版本为准），且构建时启用了 cgo 插件支持（`X-CPA-SUPPORT-PLUGIN: 1`）
-- 平台：`linux/amd64`、`darwin/arm64`、`darwin/amd64`
+- 平台：`linux/{amd64,arm64}`、`darwin/{amd64,arm64}`、`windows/{amd64,arm64}`、`freebsd/amd64`
+
+  与 CLIProxyAPI 官方发布的可加载插件的平台清单一致。`freebsd/arm64` 不在其中：上游只提供 `freebsd_aarch64_no-plugin` 构建，没有能加载插件的宿主。
 
 ## 安装
 
 从 [Releases](https://github.com/xspeed1989/cpa-plugin-deepseek/releases) 下载对应平台的 zip，解压到 CLIProxyAPI 的 `plugins/` 目录：
 
 ```bash
-curl -sL -O https://github.com/xspeed1989/cpa-plugin-deepseek/releases/latest/download/deepseek-cpa_0.2.0_linux_amd64.zip
-unzip -o deepseek-cpa_0.2.0_linux_amd64.zip -d <cliproxyapi>/plugins/
+# 以 linux/amd64 为例，其他平台把文件名里的平台段换掉即可
+version=0.3.0
+curl -sL -O "https://github.com/xspeed1989/cpa-plugin-deepseek/releases/download/v${version}/deepseek-cpa_${version}_linux_amd64.zip"
+unzip -o "deepseek-cpa_${version}_linux_amd64.zip" -d <cliproxyapi>/plugins/
 ```
 
 解压后目录里应是 `deepseek-cpa.so`（macOS 为 `deepseek-cpa.dylib`）——插件 ID 就取自这个文件名，不能改。
@@ -141,7 +145,7 @@ python3 test/chat_e2e.py        # thinking 开关双向对照、usage、[DONE]
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-CI 在三个原生 runner 上分别构建，汇总 `checksums.txt` 并创建 Release。`platforms.txt` 是平台矩阵的唯一来源，`build.sh`、`scripts/package-release.sh` 与发布工作流都经 `scripts/platforms.sh` 读取它。
+CI 在原生 runner 上分别构建（FreeBSD 在 VM 内构建），汇总 `checksums.txt` 并创建 Release。也可以在 Actions 里手动触发 `release` 工作流试跑整张矩阵——手动运行不会发布。`platforms.txt` 是平台矩阵的唯一来源，`build.sh`、`scripts/package-release.sh` 与发布工作流都经 `scripts/platforms.sh` 读取它。
 
 ## 文档
 
