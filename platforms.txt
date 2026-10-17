@@ -2,16 +2,18 @@
 #
 # Columns: <goos>/<goarch>  <github runner>
 #
-# The runner must be native for its target: this plugin is a c-shared library,
-# so it needs a C toolchain for its own GOOS/GOARCH. Cross-compiling c-shared
-# from Linux to macOS or Windows requires a cross toolchain we do not ship.
+# The runner must have a C toolchain that can target its line's platform. All
+# macOS targets build on macos-latest: Apple's clang ships a universal SDK, so
+# the arm64 runner produces the amd64 artefact too. macos-13 (the old Intel
+# runner) is retired and its jobs queue forever, so it is not used.
 #
-# Windows is deliberately absent: c-shared on windows/amd64 needs a mingw
-# toolchain, and this matrix only lists platforms that build natively and green.
+# Cross-compiling c-shared from Linux to macOS or Windows needs a cross toolchain
+# we do not ship. Windows is deliberately absent: c-shared on windows/amd64 needs
+# mingw, and this matrix only lists platforms that build green.
 #
 # scripts/package-release.sh validates the current platform against this file,
 # and .github/workflows/release.yml builds its matrix from it, so the two can
 # never disagree.
 linux/amd64 ubuntu-latest
 darwin/arm64 macos-latest
-darwin/amd64 macos-13
+darwin/amd64 macos-latest

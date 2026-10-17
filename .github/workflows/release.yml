@@ -54,7 +54,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: build and package
-        run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}"
+        run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}" "${{ matrix.target }}"
       - name: check artefacts against the plugin-store contract
         run: python3 test/package_check.py
       - uses: actions/upload-artifact@v4

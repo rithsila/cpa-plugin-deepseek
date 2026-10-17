@@ -10,12 +10,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-version="${1:?usage: scripts/package-release.sh <version>}"
+version="${1:?usage: scripts/package-release.sh <version> [<goos>/<goarch>]}"
 plugin_id="deepseek-cpa"
 
-goos="$(go env GOOS)"
-goarch="$(go env GOARCH)"
-target="${goos}/${goarch}"
+# An explicit target lets one runner build both architectures of its platform,
+# which macOS needs: the arm64 runner also produces the amd64 artefact.
+target="${2:-$(go env GOOS)/$(go env GOARCH)}"
+export GOOS="${target%%/*}"
+export GOARCH="${target##*/}"
+goos="$GOOS"
+goarch="$GOARCH"
 
 if ! awk '!/^#/ && NF {print $1}' platforms.txt | grep -qx "$target"; then
   echo "unsupported release platform ${target}; platforms.txt lists:" >&2
