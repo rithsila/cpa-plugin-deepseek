@@ -1,19 +1,25 @@
 # Release matrix: one line per published artefact.
 #
-# Columns: <goos>/<goarch>  <github runner>
+# Columns: <goos>/<goarch>  <github runner>  <toolchain>
 #
-# The runner must have a C toolchain that can target its line's platform. All
-# macOS targets build on macos-latest: Apple's clang ships a universal SDK, so
-# the arm64 runner produces the amd64 artefact too. macos-13 (the old Intel
-# runner) is retired and its jobs queue forever, so it is not used.
+# The target list mirrors the platforms CLIProxyAPI itself publishes, because a
+# plugin is useless on a host nobody ships. The toolchain column tells the
+# release workflow how to get a C compiler for that target; this plugin is a
+# c-shared library, so every platform needs one.
 #
-# Cross-compiling c-shared from Linux to macOS or Windows needs a cross toolchain
-# we do not ship. Windows is deliberately absent: c-shared on windows/amd64 needs
-# mingw, and this matrix only lists platforms that build green.
+#   native            the runner's own toolchain already targets it
+#   zig               cross-compile with zig cc (no native runner exists)
+#   msys2-mingw64     MSYS2 mingw64 gcc on a Windows runner
+#   msys2-clangarm64  MSYS2 clangarm64 on a Windows runner
 #
 # build.sh, scripts/package-release.sh and .github/workflows/release.yml all
 # read this file through scripts/platforms.sh, including how a line is parsed,
 # so they cannot disagree about the matrix.
-linux/amd64 ubuntu-latest
-darwin/arm64 macos-latest
-darwin/amd64 macos-latest
+linux/amd64 ubuntu-latest native
+linux/arm64 ubuntu-24.04-arm native
+darwin/arm64 macos-latest native
+darwin/amd64 macos-latest native
+windows/amd64 windows-latest msys2-mingw64
+windows/arm64 windows-latest msys2-clangarm64
+freebsd/amd64 ubuntu-latest zig
+freebsd/arm64 ubuntu-latest zig

@@ -8,6 +8,13 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Test the matrix without cutting a release.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build (no leading v)
+        required: true
+        default: "0.0.0-matrix"
 
 permissions:
   contents: write
@@ -22,17 +29,21 @@ jobs:
       - uses: actions/checkout@v4
       - id: parse
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          registry_version="$(python3 -c 'import json; print(json.load(open("registry.json"))["plugins"][0]["version"])')"
-          if [ "$registry_version" != "$version" ]; then
-            echo "registry.json version (${registry_version}) does not match the release tag (${version})" >&2
-            echo "bump registry.json before tagging" >&2
-            exit 1
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            registry_version="$(python3 -c 'import json; print(json.load(open("registry.json"))["plugins"][0]["version"])')"
+            if [ "$registry_version" != "$version" ]; then
+              echo "registry.json version (${registry_version}) does not match the release tag (${version})" >&2
+              echo "bump registry.json before tagging" >&2
+              exit 1
+            fi
           fi
           # The matrix comes from platforms.txt through the same helper the local
           # scripts use, so the comment-stripping rule lives in one place.
           include="$(source scripts/platforms.sh && platforms_entries \
-            | awk '{ printf "{\"target\":\"%s\",\"runner\":\"%s\"}\n", $1, $2 }' \
+            | awk '{ printf "{\"target\":\"%s\",\"runner\":\"%s\",\"toolchain\":\"%s\"}\n", $1, $2, $3 }' \
             | jq -s -c '.')"
           {
             echo "include=${include}"
@@ -51,10 +62,40 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: install zig (cross toolchain)
+        if: matrix.toolchain == 'zig'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: select zig cc for the freebsd target
+        if: matrix.toolchain == 'zig'
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            freebsd/amd64) triple=x86_64-freebsd ;;
+            freebsd/arm64) triple=aarch64-freebsd ;;
+            *) echo "no zig triple for ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          echo "CC=zig cc -target ${triple}" >> "$GITHUB_ENV"
+      - name: select mingw64 gcc
+        if: matrix.toolchain == 'msys2-mingw64'
+        shell: bash
+        run: |
+          echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+          echo "CC=gcc" >> "$GITHUB_ENV"
+      - name: select clangarm64
+        if: matrix.toolchain == 'msys2-clangarm64'
+        shell: bash
+        run: |
+          echo "C:/msys64/clangarm64/bin" >> "$GITHUB_PATH"
+          echo "CC=clang" >> "$GITHUB_ENV"
       - name: build and package
+        shell: bash
         run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}" "${{ matrix.target }}"
       - name: check artefacts against the plugin-store contract
-        run: python3 test/package_check.py
+        shell: bash
+        run: |
+          "$(command -v python3 || command -v python)" test/package_check.py
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ strategy.job-index }}
@@ -62,6 +103,8 @@ jobs:
 
   publish:
     needs: [matrix, build]
+    # A manual run only validates the matrix; it must not publish anything.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
