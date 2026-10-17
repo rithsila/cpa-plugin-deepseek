@@ -21,8 +21,9 @@ var ErrUnsupported = errors.New("unsupported")
 // The cgo/ABI layer implements it; tests substitute a fake so no upstream,
 // filesystem, or host process is involved.
 type HostBridge interface {
-	// Log writes through the host logger. Never pass secrets or raw bodies.
-	Log(ctx context.Context, level, message string) error
+	// Log writes through the host logger with structured fields. Never pass
+	// secrets, credentials, or raw request/response bodies.
+	Log(ctx context.Context, level, message string, fields map[string]any) error
 	// ListAuths returns the credential records the host currently knows about.
 	ListAuths(ctx context.Context) ([]pluginapi.HostAuthFileEntry, error)
 	// GetAuth returns one credential payload by its host auth index. The model

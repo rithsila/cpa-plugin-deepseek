@@ -221,7 +221,7 @@ func (s *server) pumpStream(ctx context.Context, streamID string, chunks <-chan 
 			// The stream is already gone, so the host log is the last place this
 			// can surface; if the log call fails too there is nothing left to
 			// report to.
-			_ = s.bridge.Log(ctx, "warn", "stream close failed: "+err.Error())
+			_ = s.bridge.Log(ctx, "warn", "stream close failed", map[string]any{"error": err.Error()})
 		}
 	}
 	for chunk := range chunks {

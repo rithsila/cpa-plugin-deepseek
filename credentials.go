@@ -186,7 +186,7 @@ func (p *Plugin) addKey(ctx context.Context, body []byte) (pluginapi.ManagementR
 	if err != nil {
 		return pluginapi.ManagementResponse{}, fmt.Errorf("management.add_key: %w", err)
 	}
-	if err := p.bridge.Log(ctx, "info", "credential stored as "+saved.Name); err != nil {
+	if err := p.bridge.Log(ctx, "info", "credential stored", map[string]any{"name": saved.Name}); err != nil {
 		return pluginapi.ManagementResponse{}, fmt.Errorf("management.add_key: %w", err)
 	}
 	return jsonResponse(http.StatusCreated, map[string]string{"name": saved.Name})
@@ -220,7 +220,7 @@ func (p *Plugin) removeKey(ctx context.Context, names []string) (pluginapi.Manag
 		}
 		// The file name is user-controlled and could itself be a key, so the
 		// log line carries no identifier.
-		if err := p.bridge.Log(ctx, "info", "credential removed"); err != nil {
+		if err := p.bridge.Log(ctx, "info", "credential removed", nil); err != nil {
 			return pluginapi.ManagementResponse{}, fmt.Errorf("management.remove_key: %w", err)
 		}
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNoContent}, nil

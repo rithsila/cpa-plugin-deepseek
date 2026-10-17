@@ -47,7 +47,7 @@ func (f *fakeSink) snapshot() ([]pluginapi.ExecutorStreamChunk, []string) {
 // testBridge satisfies the host bridge without touching the host process.
 type testBridge struct{}
 
-func (testBridge) Log(context.Context, string, string) error { return nil }
+func (testBridge) Log(context.Context, string, string, map[string]any) error { return nil }
 
 func (testBridge) ListAuths(context.Context) ([]pluginapi.HostAuthFileEntry, error) {
 	return nil, nil

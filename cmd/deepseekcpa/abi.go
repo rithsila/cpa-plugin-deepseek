@@ -179,11 +179,12 @@ type cgoBridge struct{}
 
 // Log writes through the host logger. Errors are returned so callers can fail
 // loudly instead of losing the message.
-func (cgoBridge) Log(_ context.Context, level, message string) error {
+func (cgoBridge) Log(_ context.Context, level, message string, fields map[string]any) error {
 	payload, err := json.Marshal(struct {
-		Level   string `json:"level"`
-		Message string `json:"message"`
-	}{Level: level, Message: message})
+		Level   string         `json:"level"`
+		Message string         `json:"message"`
+		Fields  map[string]any `json:"fields,omitempty"`
+	}{Level: level, Message: message, Fields: fields})
 	if err != nil {
 		return fmt.Errorf("encode log request: %w", err)
 	}

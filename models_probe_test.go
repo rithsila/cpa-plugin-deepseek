@@ -119,6 +119,9 @@ func TestStaticModelsFallsBackWhenTheProbeFails(t *testing.T) {
 	if !strings.Contains(strings.Join(bridge.logs, "\n"), "bootstrap") {
 		t.Errorf("logs = %v, want a line explaining the fallback", bridge.logs)
 	}
+	if !strings.Contains(fieldText(bridge), "status 500") {
+		t.Errorf("log fields = %v, want the upstream status recorded", bridge.logFields)
+	}
 }
 
 func TestStaticModelsDoesNotCacheAFailedProbe(t *testing.T) {
@@ -217,7 +220,7 @@ func TestProbeRejectsAPartiallyIdentifiableUpstreamList(t *testing.T) {
 	if cached := plugin.cachedModels(); len(cached) != 0 {
 		t.Errorf("cached %d models, want nothing cached from a malformed payload", len(cached))
 	}
-	if !strings.Contains(strings.Join(bridge.logs, "\n"), "has no id") {
-		t.Errorf("logs = %v, want the probe failure recorded", bridge.logs)
+	if !strings.Contains(fieldText(bridge), "has no id") {
+		t.Errorf("log fields = %v, want the probe failure reason recorded", bridge.logFields)
 	}
 }

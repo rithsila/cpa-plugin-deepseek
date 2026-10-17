@@ -39,7 +39,7 @@ func Build(configYAML []byte, bridge HostBridge) (pluginapi.Plugin, *Plugin, err
 		return pluginapi.Plugin{}, nil, err
 	}
 	p := &Plugin{bridge: bridge}
-	if err := p.bridge.Log(context.Background(), "info", "deepseek-cpa registered"); err != nil {
+	if err := p.bridge.Log(context.Background(), "info", "deepseek-cpa registered", nil); err != nil {
 		return pluginapi.Plugin{}, nil, fmt.Errorf("build: host log: %w", err)
 	}
 
@@ -87,7 +87,7 @@ func (p *Plugin) StaticModels(ctx context.Context, _ pluginapi.StaticModelReques
 		// The fallback log is the last diagnostic before the bootstrap list, and
 		// failing registration because the logger failed would break the promise
 		// that a failed probe never blocks the plugin from loading.
-		_ = p.bridge.Log(ctx, "info", "serving bootstrap models: "+err.Error())
+		_ = p.bridge.Log(ctx, "info", "serving bootstrap models", map[string]any{"reason": err.Error()})
 		return pluginapi.ModelResponse{Provider: Provider, Models: publishModels(defaultModels())}, nil
 	}
 	p.setModels(entries)
@@ -127,11 +127,6 @@ func (p *Plugin) CountTokens(context.Context, pluginapi.ExecutorRequest) (plugin
 func (p *Plugin) HttpRequest(context.Context, pluginapi.ExecutorHTTPRequest) (pluginapi.ExecutorHTTPResponse, error) {
 	return pluginapi.ExecutorHTTPResponse{}, notImplemented("executor.http_request")
 }
-
-// HandleUsage receives completed usage records from the host. Structured usage
-// logging lands with the usage ticket; the capability is declared now so the
-// host routes records to this plugin from the first release.
-func (p *Plugin) HandleUsage(context.Context, pluginapi.UsageRecord) {}
 
 func notImplemented(method string) error {
 	return fmt.Errorf("%s: %w", method, ErrNotImplemented)

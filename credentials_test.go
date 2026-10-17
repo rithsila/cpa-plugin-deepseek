@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 // fakeBridge is the host seam: no host process, no network, no surprise writes.
 type fakeBridge struct {
 	logs       []string
+	logFields  []map[string]any
 	auths      []pluginapi.HostAuthFileEntry
 	saved      []pluginapi.HostAuthSaveRequest
 	requests   []pluginapi.HTTPRequest
@@ -28,8 +30,9 @@ type fakeBridge struct {
 	authJSON   map[string][]byte
 }
 
-func (f *fakeBridge) Log(_ context.Context, level, message string) error {
+func (f *fakeBridge) Log(_ context.Context, level, message string, fields map[string]any) error {
 	f.logs = append(f.logs, level+": "+message)
+	f.logFields = append(f.logFields, fields)
 	return nil
 }
 
@@ -80,6 +83,17 @@ func streamOf(status int, payloads ...string) pluginapi.HTTPStreamResponse {
 	}
 	close(chunks)
 	return pluginapi.HTTPStreamResponse{StatusCode: status, Chunks: chunks}
+}
+
+// fieldText renders the structured log fields for assertions.
+func fieldText(bridge *fakeBridge) string {
+	var parts []string
+	for _, fields := range bridge.logFields {
+		for key, value := range fields {
+			parts = append(parts, key+"="+fmt.Sprint(value))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func newManagementPlugin(t *testing.T, bridge *fakeBridge) *Plugin {
