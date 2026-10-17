@@ -35,8 +35,16 @@ func (p *Plugin) probeModels(ctx context.Context) ([]ModelEntry, error) {
 
 	var upstream struct {
 		Data []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID               string   `json:"id"`
+			Name             string   `json:"name"`
+			ContextWindow    int64    `json:"context_window"`
+			MaxOutputTokens  int64    `json:"max_output_tokens"`
+			InputModalities  []string `json:"input_modalities"`
+			OutputModalities []string `json:"output_modalities"`
+			Effort           struct {
+				SupportedLevels []string `json:"supported_levels"`
+				DefaultLevel    string   `json:"default_level"`
+			} `json:"effort"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body, &upstream); err != nil {
@@ -50,7 +58,15 @@ func (p *Plugin) probeModels(ctx context.Context) ([]ModelEntry, error) {
 			// published list; caching what is left would hide the problem.
 			return nil, fmt.Errorf("model probe: upstream entry %d has no id", index)
 		}
-		entries = append(entries, ModelEntry{ID: id, DisplayName: strings.TrimSpace(model.Name)})
+		entries = append(entries, ModelEntry{
+			ID:               id,
+			DisplayName:      strings.TrimSpace(model.Name),
+			ContextLength:    model.ContextWindow,
+			MaxOutputTokens:  model.MaxOutputTokens,
+			InputModalities:  model.InputModalities,
+			OutputModalities: model.OutputModalities,
+			ThinkingLevels:   orderThinkingLevels(model.Effort.SupportedLevels, model.Effort.DefaultLevel),
+		})
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("model probe: upstream listed no usable models")

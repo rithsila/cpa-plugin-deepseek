@@ -28,6 +28,73 @@ const upstreamModels = `{"object":"list","data":[
   {"id":"deepseek-flash","object":"model","owned_by":"deepseek","name":"DeepSeek-V4.1-Flash"},
   {"id":"deepseek-v4-pro","object":"model","owned_by":"deepseek","name":"DeepSeek-V4-Pro"}]}`
 
+// upstreamModelsWithCapabilities mirrors the shape DeepSeek actually serves,
+// where each entry carries its real limits, modalities and effort levels.
+const upstreamModelsWithCapabilities = `{"object":"list","data":[
+  {"id":"deepseek-flash","object":"model","owned_by":"deepseek","name":"DeepSeek-V4.1-Flash",
+   "context_window":1048576,"max_output_tokens":393216,
+   "input_modalities":["text","image"],"output_modalities":["text"],
+   "effort":{"supported_levels":["low","high","max"],"default_level":"high"}},
+  {"id":"deepseek-v4-pro","object":"model","owned_by":"deepseek","name":"DeepSeek-V4-Pro",
+   "context_window":1048576,"max_output_tokens":393216,
+   "input_modalities":["text"],"output_modalities":["text"],
+   "effort":{"supported_levels":["low","high","max"],"default_level":"high"}}]}`
+
+func TestStaticModelsPublishesUpstreamCapabilities(t *testing.T) {
+	// Leaving these empty makes the host fall back to its own Codex defaults
+	// (272000 context, medium reasoning, image input for every model), which
+	// misreports what DeepSeek serves.
+	bridge := probeBridge(upstreamModelsWithCapabilities, http.StatusOK)
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.StaticModels(context.Background(), pluginapi.StaticModelRequest{})
+	if err != nil {
+		t.Fatalf("StaticModels() error = %v", err)
+	}
+	if len(resp.Models) != 2 {
+		t.Fatalf("models = %d, want 2", len(resp.Models))
+	}
+
+	flash, pro := resp.Models[0], resp.Models[1]
+	if flash.ContextLength != 1048576 || flash.MaxCompletionTokens != 393216 {
+		t.Errorf("flash limits = %d/%d, want 1048576/393216", flash.ContextLength, flash.MaxCompletionTokens)
+	}
+	if got := strings.Join(flash.SupportedInputModalities, ","); got != "text,image" {
+		t.Errorf("flash input modalities = %q, want text,image", got)
+	}
+	if got := strings.Join(pro.SupportedInputModalities, ","); got != "text" {
+		t.Errorf("pro input modalities = %q, want text: upstream does not serve images for it", got)
+	}
+	if got := strings.Join(flash.SupportedOutputModalities, ","); got != "text" {
+		t.Errorf("flash output modalities = %q, want text", got)
+	}
+	if pro.Thinking == nil {
+		t.Fatal("pro has no thinking support, want upstream's effort levels")
+	}
+	// The host prefers "medium", otherwise the first level. These models offer
+	// none, so the upstream default has to lead the list.
+	if got := strings.Join(pro.Thinking.Levels, ","); got != "high,low,max" {
+		t.Errorf("pro thinking levels = %q, want high first", got)
+	}
+}
+
+func TestStaticModelsOmitsCapabilitiesUpstreamDidNotReport(t *testing.T) {
+	bridge := probeBridge(upstreamModels, http.StatusOK)
+	plugin := newManagementPlugin(t, bridge)
+
+	resp, err := plugin.StaticModels(context.Background(), pluginapi.StaticModelRequest{})
+	if err != nil {
+		t.Fatalf("StaticModels() error = %v", err)
+	}
+	model := resp.Models[0]
+	if model.ContextLength != 0 || model.MaxCompletionTokens != 0 {
+		t.Errorf("limits = %d/%d, want zero when upstream omitted them", model.ContextLength, model.MaxCompletionTokens)
+	}
+	if model.Thinking != nil {
+		t.Errorf("Thinking = %+v, want nil when upstream reported no effort levels", model.Thinking)
+	}
+}
+
 func TestStaticModelsPublishesTheProbedList(t *testing.T) {
 	bridge := probeBridge(upstreamModels, http.StatusOK)
 	plugin := newManagementPlugin(t, bridge)

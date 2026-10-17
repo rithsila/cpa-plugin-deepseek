@@ -101,7 +101,7 @@ export ANTHROPIC_AUTH_TOKEN=<代理的客户端密钥>
 export ANTHROPIC_MODEL=deepseek-cpa/deepseek-v4-pro
 ```
 
-**模型列表以上游为准。** 插件向 `https://api.deepseek.com/models` 探测并发布结果；上游没公布的模型不会被注册，因而也无法路由。
+**模型列表以上游为准。** 插件向 `https://api.deepseek.com/models` 探测并发布结果；上游没公布的模型不会被注册，因而也无法路由。每条模型的能力参数（上下文窗口、输出上限、输入模态、推理档位）同样照上游发布，插件不自带默认值：留空的话宿主会套用它自己的 Codex 默认值（272000 上下文、16384 输出、所有模型都收图像、默认 `medium` 推理），从而谎报 DeepSeek 的实际限制。
 
 - 没有任何 DeepSeek 凭证时：返回内置引导列表，且不发起任何网络请求。
 - 探测失败：退回内置列表并记一条日志，不影响插件加载与请求。
