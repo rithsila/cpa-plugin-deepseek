@@ -6,8 +6,9 @@ import (
 )
 
 // failureFrame renders the protocol's own terminal error event, so a client can
-// tell a broken stream from a finished one. Upstream events are never re-framed;
-// this is the one frame the plugin has to author itself.
+// tell a broken stream from a finished one. On responses and anthropic this is a
+// complete SSE frame; on chat it is a bare payload, because the host frames that
+// surface itself.
 func failureFrame(format string, cause error) []byte {
 	message := cause.Error()
 	switch format {
@@ -65,11 +66,9 @@ func bareJSON(payload map[string]any) []byte {
 	return raw
 }
 
+// jsonData wraps a payload in the SSE "data: " frame the non-chat surfaces use.
 func jsonData(payload map[string]any) []byte {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		panic("jsonData: marshaling a map of scalars cannot fail: " + err.Error())
-	}
+	raw := bareJSON(payload)
 	out := make([]byte, 0, len(raw)+8)
 	out = append(out, "data: "...)
 	out = append(out, raw...)

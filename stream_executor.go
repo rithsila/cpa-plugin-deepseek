@@ -71,10 +71,12 @@ func (t *terminalTracker) isTerminal(eventType string, data []byte) bool {
 	return false
 }
 
-// ExecuteStream forwards one streaming request to DeepSeek. Every upstream chunk
-// is handed on unchanged, including its framing; a stream that ends without a
-// terminal event is closed with a synthesized response.failed so the client can
-// tell truncation from a normal finish.
+// ExecuteStream forwards one streaming request to DeepSeek. On responses and
+// anthropic every upstream chunk is handed on unchanged, framing included; on
+// chat the chunks are split into bare payloads because the host frames that
+// surface. A stream that ends without a terminal event is closed with the
+// protocol's own failure event so the client can tell truncation from a normal
+// finish.
 func (p *Plugin) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequest) (pluginapi.ExecutorStreamResponse, error) {
 	call, err := p.prepareCall(req)
 	if err != nil {
@@ -107,9 +109,11 @@ func (p *Plugin) ExecuteStream(ctx context.Context, req pluginapi.ExecutorReques
 	}, nil
 }
 
-// forwardChunks hands each upstream chunk to the host untouched and closes the
-// stream exactly once, including when the consumer stops reading or the request
-// is cancelled (the source is drained so the host can release it).
+// forwardChunks hands each upstream chunk to the host and closes the stream
+// exactly once, including when the consumer stops reading or the request is
+// cancelled (the source is drained so the host can release it). Chunks keep their
+// upstream framing except on chat, where the host does the framing and expects
+// bare payloads.
 func (p *Plugin) forwardChunks(ctx context.Context, source <-chan pluginapi.HTTPStreamChunk, format string) <-chan pluginapi.ExecutorStreamChunk {
 	out := make(chan pluginapi.ExecutorStreamChunk)
 	go func() {
