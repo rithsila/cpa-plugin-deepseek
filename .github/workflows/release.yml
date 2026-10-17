@@ -91,12 +91,10 @@ jobs:
           usesh: true
           # sync expects a method name, not a boolean.
           sync: rsync
-          prepare: pkg install -y go python3
-          envs: VERSION,TARGET
-          run: ./scripts/package-release.sh "$VERSION" "$TARGET"
-        env:
-          VERSION: ${{ needs.matrix.outputs.version }}
-          TARGET: ${{ matrix.target }}
+          # bash is not part of the FreeBSD base system and the script's shebang
+          # needs it.
+          prepare: pkg install -y go python3 bash
+          run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}" "${{ matrix.target }}"
       - name: check artefacts against the plugin-store contract
         shell: bash
         run: |
