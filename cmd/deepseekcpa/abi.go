@@ -200,15 +200,13 @@ func (cgoBridge) Do(_ context.Context, req pluginapi.HTTPRequest) (pluginapi.HTT
 	if err != nil {
 		return pluginapi.HTTPResponse{}, err
 	}
-	var resp hostHTTPResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	// The host marshals pluginapi.HTTPResponse itself, which carries no JSON
+	// tags, so the wire keys are the Go field names.
+	var response pluginapi.HTTPResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
 		return pluginapi.HTTPResponse{}, fmt.Errorf("decode http response: %w", err)
 	}
-	return pluginapi.HTTPResponse{
-		StatusCode: resp.StatusCode,
-		Headers:    http.Header(resp.Headers),
-		Body:       resp.Body,
-	}, nil
+	return response, nil
 }
 
 // DoStream opens a host HTTP stream and forwards its chunks verbatim.
@@ -319,12 +317,6 @@ type hostHTTPRequest struct {
 	Headers     http.Header                `json:"headers,omitempty"`
 	Body        []byte                     `json:"body,omitempty"`
 	WireProfile *pluginapi.HTTPWireProfile `json:"wire_profile,omitempty"`
-}
-
-type hostHTTPResponse struct {
-	StatusCode int         `json:"status_code"`
-	Headers    http.Header `json:"headers,omitempty"`
-	Body       []byte      `json:"body,omitempty"`
 }
 
 // callHost invokes one host callback and returns its raw result bytes.

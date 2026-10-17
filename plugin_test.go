@@ -110,8 +110,8 @@ func TestUnimplementedCapabilitiesFailLoudly(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if _, err := descriptor.Capabilities.Executor.Execute(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("Execute error = %v, want ErrNotImplemented", err)
+	if _, err := descriptor.Capabilities.Executor.CountTokens(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
+		t.Errorf("CountTokens error = %v, want ErrNotImplemented", err)
 	}
 	if _, err := descriptor.Capabilities.ThinkingApplier.ApplyThinking(ctx, pluginapi.ThinkingApplyRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("ApplyThinking error = %v, want ErrNotImplemented", err)

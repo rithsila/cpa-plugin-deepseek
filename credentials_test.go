@@ -15,11 +15,14 @@ import (
 
 // fakeBridge is the host seam: no host process, no network, no surprise writes.
 type fakeBridge struct {
-	logs    []string
-	auths   []pluginapi.HostAuthFileEntry
-	saved   []pluginapi.HostAuthSaveRequest
-	listErr error
-	saveErr error
+	logs       []string
+	auths      []pluginapi.HostAuthFileEntry
+	saved      []pluginapi.HostAuthSaveRequest
+	requests   []pluginapi.HTTPRequest
+	listErr    error
+	saveErr    error
+	doResponse pluginapi.HTTPResponse
+	doErr      error
 }
 
 func (f *fakeBridge) Log(_ context.Context, level, message string) error {
@@ -42,8 +45,12 @@ func (f *fakeBridge) SaveAuth(_ context.Context, req pluginapi.HostAuthSaveReque
 	return pluginapi.HostAuthSaveResponse{Name: req.Name, Path: "/tmp/" + req.Name}, nil
 }
 
-func (f *fakeBridge) Do(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
-	return pluginapi.HTTPResponse{}, errors.New("fake bridge: Do not expected")
+func (f *fakeBridge) Do(_ context.Context, req pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+	if f.doErr != nil {
+		return pluginapi.HTTPResponse{}, f.doErr
+	}
+	f.requests = append(f.requests, req)
+	return f.doResponse, nil
 }
 
 func (f *fakeBridge) DoStream(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {

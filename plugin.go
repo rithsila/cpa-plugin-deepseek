@@ -103,11 +103,6 @@ func (p *Plugin) RefreshAuth(context.Context, pluginapi.AuthRefreshRequest) (plu
 	return pluginapi.AuthRefreshResponse{}, unsupported("auth.refresh", "DeepSeek API keys do not expire, so there is nothing to refresh")
 }
 
-// Execute forwards one non-streaming request upstream.
-func (p *Plugin) Execute(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
-	return pluginapi.ExecutorResponse{}, notImplemented("executor.execute")
-}
-
 // ExecuteStream forwards one streaming request upstream.
 func (p *Plugin) ExecuteStream(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorStreamResponse, error) {
 	return pluginapi.ExecutorStreamResponse{}, notImplemented("executor.execute_stream")

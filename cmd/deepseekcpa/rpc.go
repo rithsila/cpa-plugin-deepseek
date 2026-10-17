@@ -18,6 +18,8 @@ const (
 	codeInvalidConfig  = "invalid_config"
 	codeNotRegistered  = "not_registered"
 	codeNotImplemented = "not_implemented"
+	codeUnsupported    = "unsupported"
+	codeUpstream       = "upstream_error"
 	codeInternal       = "internal_error"
 )
 
@@ -30,6 +32,9 @@ type envelope struct {
 type envelopeError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// HTTPStatus lets an upstream failure reach the client with its own status
+	// instead of the host defaulting to 500.
+	HTTPStatus int `json:"http_status,omitempty"`
 }
 
 // lifecycleRequest is the payload of plugin.register and plugin.reconfigure.
@@ -258,10 +263,7 @@ func decodeInto[T any](payload []byte, target *T, call func() (any, error)) ([]b
 	}
 	result, err := call()
 	if err != nil {
-		if errors.Is(err, deepseekcpa.ErrNotImplemented) {
-			return errorEnvelope(codeNotImplemented, err.Error()), nil
-		}
-		return errorEnvelope(codeInternal, err.Error()), nil
+		return errorEnvelopeFor(err), nil
 	}
 	return okEnvelope(result)
 }
@@ -274,10 +276,30 @@ func okEnvelope(v any) ([]byte, error) {
 	return json.Marshal(envelope{OK: true, Result: raw})
 }
 
-func errorEnvelope(code, message string) []byte {
-	raw, err := json.Marshal(envelope{OK: false, Error: &envelopeError{Code: code, Message: message}})
+// errorEnvelopeFor maps a plugin failure onto the wire envelope, preserving an
+// upstream HTTP status when the error carries one.
+func errorEnvelopeFor(err error) []byte {
+	var statusCoder interface{ StatusCode() int }
+	if errors.As(err, &statusCoder) && statusCoder.StatusCode() > 0 {
+		return errorEnvelopeWithStatus(codeUpstream, err.Error(), statusCoder.StatusCode())
+	}
+	if errors.Is(err, deepseekcpa.ErrNotImplemented) {
+		return errorEnvelope(codeNotImplemented, err.Error())
+	}
+	if errors.Is(err, deepseekcpa.ErrUnsupported) {
+		return errorEnvelope(codeUnsupported, err.Error())
+	}
+	return errorEnvelope(codeInternal, err.Error())
+}
+
+func errorEnvelopeWithStatus(code, message string, status int) []byte {
+	raw, err := json.Marshal(envelope{OK: false, Error: &envelopeError{Code: code, Message: message, HTTPStatus: status}})
 	if err != nil {
-		panic("errorEnvelope: marshaling a struct of strings cannot fail: " + err.Error())
+		panic("errorEnvelopeWithStatus: marshaling a struct of strings cannot fail: " + err.Error())
 	}
 	return raw
+}
+
+func errorEnvelope(code, message string) []byte {
+	return errorEnvelopeWithStatus(code, message, 0)
 }

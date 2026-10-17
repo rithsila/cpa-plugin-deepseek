@@ -145,9 +145,9 @@ func TestUnbuiltCapabilityReturnsNotImplementedCode(t *testing.T) {
 	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	raw, err := srv.handle(pluginabi.MethodExecutorExecute, []byte(`{}`))
+	raw, err := srv.handle(pluginabi.MethodExecutorCountTokens, []byte(`{}`))
 	if err != nil {
-		t.Fatalf("handle(executor.execute) error = %v", err)
+		t.Fatalf("handle(executor.count_tokens) error = %v", err)
 	}
 	env := decodeEnvelope(t, raw)
 	if env.OK || env.Error == nil || env.Error.Code != codeNotImplemented {
@@ -225,5 +225,51 @@ func TestManagementHandleDispatchesToListKeys(t *testing.T) {
 	}
 	if response.StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", response.StatusCode)
+	}
+}
+
+// statusBridge returns one fixed upstream response so the executor error path
+// can be exercised through the RPC envelope.
+type statusBridge struct {
+	testBridge
+	status int
+	body   string
+}
+
+func (b statusBridge) Do(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+	return pluginapi.HTTPResponse{StatusCode: b.status, Body: []byte(b.body)}, nil
+}
+
+func TestUpstreamStatusSurvivesTheErrorEnvelope(t *testing.T) {
+	const body = `{"error":{"message":"slow down","type":"rate_limit"}}`
+	srv := newServer(statusBridge{status: 429, body: body})
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	request := pluginapi.ExecutorRequest{
+		Model:        "deepseek-cpa/deepseek-v4-pro",
+		Format:       "openai-response",
+		SourceFormat: "openai-response",
+		Payload:      []byte(`{"model":"deepseek-cpa/deepseek-v4-pro"}`),
+		StorageJSON:  []byte(`{"type":"deepseek-cpa","api_key":"sk-x"}`),
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	raw, err := srv.handle(pluginabi.MethodExecutorExecute, payload)
+	if err != nil {
+		t.Fatalf("handle(executor.execute) error = %v", err)
+	}
+	env := decodeEnvelope(t, raw)
+	if env.OK || env.Error == nil {
+		t.Fatalf("envelope = %+v, want an error envelope", env)
+	}
+	if env.Error.HTTPStatus != 429 {
+		t.Errorf("http_status = %d, want 429 so the client sees the upstream status", env.Error.HTTPStatus)
+	}
+	if env.Error.Message != body {
+		t.Errorf("message = %q, want the upstream body preserved", env.Error.Message)
 	}
 }
