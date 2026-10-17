@@ -15,6 +15,10 @@ type testBridge struct{}
 
 func (testBridge) Log(context.Context, string, string) error { return nil }
 
+func (testBridge) ListAuths(context.Context) ([]pluginapi.HostAuthFileEntry, error) {
+	return nil, nil
+}
+
 func (testBridge) SaveAuth(context.Context, pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error) {
 	return pluginapi.HostAuthSaveResponse{}, nil
 }
@@ -163,5 +167,63 @@ func TestUnknownMethodIsReported(t *testing.T) {
 	env := decodeEnvelope(t, raw)
 	if env.OK || env.Error == nil || env.Error.Code != codeUnknownMethod {
 		t.Fatalf("envelope = %+v, want unknown_method", env)
+	}
+}
+
+func TestManagementRegisterSerialisesRoutesWithoutHandlers(t *testing.T) {
+	srv := newServer(testBridge{})
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	raw, err := srv.handle(pluginabi.MethodManagementRegister, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("handle(management.register) error = %v", err)
+	}
+	env := decodeEnvelope(t, raw)
+	if !env.OK {
+		t.Fatalf("ok = false, error = %+v", env.Error)
+	}
+	var reg managementRegistration
+	if err := json.Unmarshal(env.Result, &reg); err != nil {
+		t.Fatalf("unmarshal registration: %v", err)
+	}
+	if len(reg.Routes) != 3 {
+		t.Fatalf("routes = %d, want 3", len(reg.Routes))
+	}
+	for _, route := range reg.Routes {
+		if route.Path != "/plugins/deepseek-cpa/keys" {
+			t.Errorf("route path = %q, want the keys route", route.Path)
+		}
+	}
+	if len(reg.Resources) != 0 {
+		t.Errorf("resources = %d, want none", len(reg.Resources))
+	}
+}
+
+func TestManagementHandleDispatchesToListKeys(t *testing.T) {
+	srv := newServer(testBridge{})
+	if _, err := srv.handle(pluginabi.MethodPluginRegister, []byte(`{}`)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	payload, err := json.Marshal(managementHandleRequest{
+		ManagementRequest: pluginapi.ManagementRequest{Method: "GET", Path: "/plugins/deepseek-cpa/keys"},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	raw, err := srv.handle(pluginabi.MethodManagementHandle, payload)
+	if err != nil {
+		t.Fatalf("handle(management.handle) error = %v", err)
+	}
+	env := decodeEnvelope(t, raw)
+	if !env.OK {
+		t.Fatalf("ok = false, error = %+v", env.Error)
+	}
+	var response pluginapi.ManagementResponse
+	if err := json.Unmarshal(env.Result, &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", response.StatusCode)
 	}
 }

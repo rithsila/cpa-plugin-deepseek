@@ -61,6 +61,33 @@ type identifierResponse struct {
 	Identifier string `json:"identifier"`
 }
 
+// managementRegistration mirrors the host contract for management.register.
+// Handlers are not serialisable: the host supplies its own dispatcher, which
+// routes back into management.handle.
+type managementRegistration struct {
+	Routes    []managementRoute    `json:"routes,omitempty"`
+	Resources []managementResource `json:"resources,omitempty"`
+}
+
+type managementRoute struct {
+	Method      string `json:"Method"`
+	Path        string `json:"Path"`
+	Menu        string `json:"Menu,omitempty"`
+	Description string `json:"Description,omitempty"`
+}
+
+type managementResource struct {
+	Path        string `json:"Path"`
+	Menu        string `json:"Menu,omitempty"`
+	Description string `json:"Description,omitempty"`
+}
+
+// managementHandleRequest is what the host sends to management.handle.
+type managementHandleRequest struct {
+	pluginapi.ManagementRequest
+	HostCallbackID string `json:"host_callback_id,omitempty"`
+}
+
 // server holds the plugin instance the host registered and dispatches RPC
 // methods to it.
 type server struct {
@@ -140,7 +167,15 @@ func (s *server) handle(method string, payload []byte) ([]byte, error) {
 		return okEnvelope(map[string]any{})
 	case pluginabi.MethodManagementRegister:
 		var req pluginapi.ManagementRegistrationRequest
-		return decodeInto(payload, &req, func() (any, error) { return instance.RegisterManagement(ctx, req) })
+		return decodeInto(payload, &req, func() (any, error) {
+			registered, err := instance.RegisterManagement(ctx, req)
+			return describeManagement(registered), err
+		})
+	case pluginabi.MethodManagementHandle:
+		var req managementHandleRequest
+		return decodeInto(payload, &req, func() (any, error) {
+			return instance.HandleManagement(ctx, req.ManagementRequest)
+		})
 	default:
 		return errorEnvelope(codeUnknownMethod, "unknown method: "+method), nil
 	}
@@ -187,6 +222,30 @@ func describeRegistration(descriptor pluginapi.Plugin) registration {
 			ManagementAPI:         caps.ManagementAPI != nil,
 		},
 	}
+}
+
+// describeManagement drops the non-serialisable handlers from the registration.
+func describeManagement(registered pluginapi.ManagementRegistrationResponse) managementRegistration {
+	out := managementRegistration{
+		Routes:    make([]managementRoute, 0, len(registered.Routes)),
+		Resources: make([]managementResource, 0, len(registered.Resources)),
+	}
+	for _, route := range registered.Routes {
+		out.Routes = append(out.Routes, managementRoute{
+			Method:      route.Method,
+			Path:        route.Path,
+			Menu:        route.Menu,
+			Description: route.Description,
+		})
+	}
+	for _, resource := range registered.Resources {
+		out.Resources = append(out.Resources, managementResource{
+			Path:        resource.Path,
+			Menu:        resource.Menu,
+			Description: resource.Description,
+		})
+	}
+	return out
 }
 
 // decodeInto unmarshals the payload, runs the capability call, and converts a

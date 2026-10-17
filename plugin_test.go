@@ -11,7 +11,7 @@ import (
 )
 
 func TestBuildDeclaresOnlyImplementedCapabilities(t *testing.T) {
-	descriptor, _, err := Build(nil, stubBridge{})
+	descriptor, _, err := Build(nil, &fakeBridge{})
 	if err != nil {
 		t.Fatalf("Build() error = %v, want nil", err)
 	}
@@ -54,7 +54,7 @@ func TestBuildDeclaresOnlyImplementedCapabilities(t *testing.T) {
 }
 
 func TestBuildRegistersProtocolAlignedExecutor(t *testing.T) {
-	descriptor, _, err := Build(nil, stubBridge{})
+	descriptor, _, err := Build(nil, &fakeBridge{})
 	if err != nil {
 		t.Fatalf("Build() error = %v, want nil", err)
 	}
@@ -78,7 +78,7 @@ func TestBuildRegistersProtocolAlignedExecutor(t *testing.T) {
 }
 
 func TestStaticModelsAreNamespacedAndOffline(t *testing.T) {
-	descriptor, _, err := Build(nil, stubBridge{})
+	descriptor, _, err := Build(nil, &fakeBridge{})
 	if err != nil {
 		t.Fatalf("Build() error = %v, want nil", err)
 	}
@@ -104,28 +104,25 @@ func TestStaticModelsAreNamespacedAndOffline(t *testing.T) {
 }
 
 func TestUnimplementedCapabilitiesFailLoudly(t *testing.T) {
-	descriptor, _, err := Build(nil, stubBridge{})
+	descriptor, _, err := Build(nil, &fakeBridge{})
 	if err != nil {
 		t.Fatalf("Build() error = %v, want nil", err)
 	}
 	ctx := context.Background()
 
-	if _, err := descriptor.Capabilities.AuthProvider.ParseAuth(ctx, pluginapi.AuthParseRequest{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ParseAuth error = %v, want ErrNotImplemented", err)
-	}
 	if _, err := descriptor.Capabilities.Executor.Execute(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("Execute error = %v, want ErrNotImplemented", err)
 	}
 	if _, err := descriptor.Capabilities.ThinkingApplier.ApplyThinking(ctx, pluginapi.ThinkingApplyRequest{}); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("ApplyThinking error = %v, want ErrNotImplemented", err)
 	}
-	if _, err := descriptor.Capabilities.ManagementAPI.RegisterManagement(ctx, pluginapi.ManagementRegistrationRequest{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("RegisterManagement error = %v, want ErrNotImplemented", err)
+	if _, err := descriptor.Capabilities.Executor.ExecuteStream(ctx, pluginapi.ExecutorRequest{}); !errors.Is(err, ErrNotImplemented) {
+		t.Errorf("ExecuteStream error = %v, want ErrNotImplemented", err)
 	}
 }
 
 func TestIdentifiersUsePluginID(t *testing.T) {
-	descriptor, _, err := Build(nil, stubBridge{})
+	descriptor, _, err := Build(nil, &fakeBridge{})
 	if err != nil {
 		t.Fatalf("Build() error = %v, want nil", err)
 	}
@@ -141,7 +138,7 @@ func TestIdentifiersUsePluginID(t *testing.T) {
 }
 
 func TestBuildRejectsInvalidConfig(t *testing.T) {
-	if _, _, err := Build([]byte("models: ["), stubBridge{}); err == nil {
+	if _, _, err := Build([]byte("models: ["), &fakeBridge{}); err == nil {
 		t.Fatal("Build() error = nil, want config validation error")
 	}
 }

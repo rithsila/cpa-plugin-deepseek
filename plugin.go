@@ -85,25 +85,22 @@ func (p *Plugin) ModelsForAuth(context.Context, pluginapi.AuthModelRequest) (plu
 	return pluginapi.ModelResponse{}, notImplemented("model.for_auth")
 }
 
-// ParseAuth recognises DeepSeek credential files written by the host.
-func (p *Plugin) ParseAuth(context.Context, pluginapi.AuthParseRequest) (pluginapi.AuthParseResponse, error) {
-	return pluginapi.AuthParseResponse{}, notImplemented("auth.parse")
-}
-
-// StartLogin reports that DeepSeek keys have no interactive login flow.
+// StartLogin reports that DeepSeek keys have no interactive login flow. This is
+// permanent, not a gap: a DeepSeek key is a static string with no OAuth or
+// device-code exchange to run.
 func (p *Plugin) StartLogin(context.Context, pluginapi.AuthLoginStartRequest) (pluginapi.AuthLoginStartResponse, error) {
-	return pluginapi.AuthLoginStartResponse{}, notImplemented("auth.login.start")
+	return pluginapi.AuthLoginStartResponse{}, unsupported("auth.login.start", "DeepSeek API keys are static and have no interactive login flow")
 }
 
 // PollLogin reports that DeepSeek keys have no interactive login flow.
 func (p *Plugin) PollLogin(context.Context, pluginapi.AuthLoginPollRequest) (pluginapi.AuthLoginPollResponse, error) {
-	return pluginapi.AuthLoginPollResponse{}, notImplemented("auth.login.poll")
+	return pluginapi.AuthLoginPollResponse{}, unsupported("auth.login.poll", "DeepSeek API keys are static and have no interactive login flow")
 }
 
 // RefreshAuth reports that DeepSeek keys never expire, so there is nothing to
 // refresh.
 func (p *Plugin) RefreshAuth(context.Context, pluginapi.AuthRefreshRequest) (pluginapi.AuthRefreshResponse, error) {
-	return pluginapi.AuthRefreshResponse{}, notImplemented("auth.refresh")
+	return pluginapi.AuthRefreshResponse{}, unsupported("auth.refresh", "DeepSeek API keys do not expire, so there is nothing to refresh")
 }
 
 // Execute forwards one non-streaming request upstream.
@@ -137,20 +134,20 @@ func (p *Plugin) ApplyThinking(context.Context, pluginapi.ThinkingApplyRequest) 
 // host routes records to this plugin from the first release.
 func (p *Plugin) HandleUsage(context.Context, pluginapi.UsageRecord) {}
 
-// RegisterManagement declares the credential and model-refresh routes.
-func (p *Plugin) RegisterManagement(context.Context, pluginapi.ManagementRegistrationRequest) (pluginapi.ManagementRegistrationResponse, error) {
-	return pluginapi.ManagementRegistrationResponse{}, notImplemented("management.register")
-}
-
 func notImplemented(method string) error {
 	return fmt.Errorf("%s: %w", method, ErrNotImplemented)
 }
 
+func unsupported(method, reason string) error {
+	return fmt.Errorf("%s: %w: %s", method, ErrUnsupported, reason)
+}
+
 var (
-	_ pluginapi.AuthProvider     = (*Plugin)(nil)
-	_ pluginapi.ModelProvider    = (*Plugin)(nil)
-	_ pluginapi.ProviderExecutor = (*Plugin)(nil)
-	_ pluginapi.ThinkingApplier  = (*Plugin)(nil)
-	_ pluginapi.UsagePlugin      = (*Plugin)(nil)
-	_ pluginapi.ManagementAPI    = (*Plugin)(nil)
+	_ pluginapi.AuthProvider      = (*Plugin)(nil)
+	_ pluginapi.ModelProvider     = (*Plugin)(nil)
+	_ pluginapi.ProviderExecutor  = (*Plugin)(nil)
+	_ pluginapi.ThinkingApplier   = (*Plugin)(nil)
+	_ pluginapi.UsagePlugin       = (*Plugin)(nil)
+	_ pluginapi.ManagementAPI     = (*Plugin)(nil)
+	_ pluginapi.ManagementHandler = (*Plugin)(nil)
 )

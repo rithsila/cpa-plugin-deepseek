@@ -154,6 +154,19 @@ func (cgoBridge) Log(_ context.Context, level, message string) error {
 	return nil
 }
 
+// ListAuths returns the credential records the host currently knows about.
+func (cgoBridge) ListAuths(_ context.Context) ([]pluginapi.HostAuthFileEntry, error) {
+	raw, err := callHost(pluginabi.MethodHostAuthList, nil)
+	if err != nil {
+		return nil, err
+	}
+	var listed hostAuthList
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return nil, fmt.Errorf("decode auth list response: %w", err)
+	}
+	return listed.Files, nil
+}
+
 // SaveAuth writes a credential record through the host.
 func (cgoBridge) SaveAuth(_ context.Context, req pluginapi.HostAuthSaveRequest) (pluginapi.HostAuthSaveResponse, error) {
 	payload, err := json.Marshal(req)
@@ -294,6 +307,10 @@ type hostStreamReadResponse struct {
 	Payload []byte `json:"payload,omitempty"`
 	Error   string `json:"error,omitempty"`
 	Done    bool   `json:"done,omitempty"`
+}
+
+type hostAuthList struct {
+	Files []pluginapi.HostAuthFileEntry `json:"files"`
 }
 
 type hostHTTPRequest struct {
