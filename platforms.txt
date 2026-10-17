@@ -2,15 +2,17 @@
 #
 # Columns: <goos>/<goarch>  <github runner>  <toolchain>
 #
-# The target list mirrors the platforms CLIProxyAPI itself publishes, because a
-# plugin is useless on a host nobody ships. The toolchain column tells the
+# The target list mirrors the platforms CLIProxyAPI publishes a plugin-capable
+# build for, because a plugin is useless on a host nobody ships. freebsd/arm64 is
+# absent on purpose: upstream ships freebsd_aarch64 only as a no-plugin build,
+# so a plugin there would target a host that cannot load it. The toolchain column tells the
 # release workflow how to get a C compiler for that target; this plugin is a
 # c-shared library, so every platform needs one.
 #
 #   native            the runner's own toolchain already targets it
-#   zig               cross-compile with zig cc (no native runner exists)
 #   msys2-mingw64     MSYS2 mingw64 gcc on a Windows runner
-#   msys2-clangarm64  MSYS2 clangarm64 on a Windows runner
+#   llvm-mingw        llvm-mingw cross toolchain for windows/arm64
+#   freebsd-vm        build inside a FreeBSD VM (no hosted FreeBSD runner)
 #
 # build.sh, scripts/package-release.sh and .github/workflows/release.yml all
 # read this file through scripts/platforms.sh, including how a line is parsed,
@@ -20,6 +22,5 @@ linux/arm64 ubuntu-24.04-arm native
 darwin/arm64 macos-latest native
 darwin/amd64 macos-latest native
 windows/amd64 windows-latest msys2-mingw64
-windows/arm64 windows-latest msys2-clangarm64
-freebsd/amd64 ubuntu-latest zig
-freebsd/arm64 ubuntu-latest zig
+windows/arm64 windows-latest llvm-mingw
+freebsd/amd64 ubuntu-latest freebsd-vm

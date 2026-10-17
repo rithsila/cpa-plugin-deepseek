@@ -62,36 +62,40 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: install zig (cross toolchain)
-        if: matrix.toolchain == 'zig'
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.13.0
-      - name: select zig cc for the freebsd target
-        if: matrix.toolchain == 'zig'
-        shell: bash
-        run: |
-          case "${{ matrix.target }}" in
-            freebsd/amd64) triple=x86_64-freebsd ;;
-            freebsd/arm64) triple=aarch64-freebsd ;;
-            *) echo "no zig triple for ${{ matrix.target }}" >&2; exit 1 ;;
-          esac
-          echo "CC=zig cc -target ${triple}" >> "$GITHUB_ENV"
       - name: select mingw64 gcc
         if: matrix.toolchain == 'msys2-mingw64'
         shell: bash
         run: |
           echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
           echo "CC=gcc" >> "$GITHUB_ENV"
-      - name: select clangarm64
-        if: matrix.toolchain == 'msys2-clangarm64'
+      - name: install llvm-mingw (windows/arm64 cross toolchain)
+        if: matrix.toolchain == 'llvm-mingw'
         shell: bash
         run: |
-          echo "C:/msys64/clangarm64/bin" >> "$GITHUB_PATH"
-          echo "CC=clang" >> "$GITHUB_ENV"
+          set -euo pipefail
+          name=llvm-mingw-20261006-ucrt-x86_64
+          curl -sSL -o "$RUNNER_TEMP/${name}.zip" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/${name}.zip"
+          unzip -q "$RUNNER_TEMP/${name}.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/${name}/bin" >> "$GITHUB_PATH"
+          echo "CC=aarch64-w64-mingw32-clang" >> "$GITHUB_ENV"
       - name: build and package
+        if: matrix.toolchain != 'freebsd-vm'
         shell: bash
         run: ./scripts/package-release.sh "${{ needs.matrix.outputs.version }}" "${{ matrix.target }}"
+      - name: build and package (inside the FreeBSD VM)
+        if: matrix.toolchain == 'freebsd-vm'
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.1"
+          usesh: true
+          sync: true
+          prepare: pkg install -y go python3
+          envs: VERSION,TARGET
+          run: ./scripts/package-release.sh "$VERSION" "$TARGET"
+        env:
+          VERSION: ${{ needs.matrix.outputs.version }}
+          TARGET: ${{ matrix.target }}
       - name: check artefacts against the plugin-store contract
         shell: bash
         run: |
