@@ -1,14 +1,14 @@
-# 转发流时按 SSE 行边界重切 chunk，保证整行一次送达
+# Re-frame Stream Chunks on SSE Newline Boundaries
 
-流式转发最初把上游 chunk 原样交给宿主，包括 chunk 边界。这会丢掉 usage，而且只在部分请求上丢。
+Stream forwarding initially forwarded upstream chunks verbatim to the host, including upstream chunk boundaries. This led to token usage data being dropped intermittently on specific requests.
 
-## 现象
+## Symptom
 
-宿主记下 `request usage` 时，`input_tokens`/`output_tokens` 常为 0，但同一条日志里 `ttft_ms`、`latency_ms`、`response_model` 都正常。实测在 Codex 客户端走的 `GET /backend-api/codex/responses` 上，61 次请求只有 6 次带 token；同一端点下其他插件的覆盖率是 96%–100%。
+When the host logged `request usage`, `input_tokens` and `output_tokens` were often 0, even though `ttft_ms`, `latency_ms`, and `response_model` were normal. In testing against `GET /backend-api/codex/responses` with a Codex client, only 6 out of 61 requests contained token counts; other plugins on the same endpoint achieved 96%–100% coverage.
 
-## 原因
+## Root Cause
 
-DeepSeek 的 `response.completed` 帧会把 `instructions` 和 `tools` 原样回显，单行 JSON 达 77KB。宿主把这些 plugin chunk 拼成 SSE 行，但缓冲有硬上限（`internal/pluginhost/adapters_executors.go`，`maxLineBufferSize = 64*1024`）；一旦在读到换行前超过上限，它把半截缓冲交给用量观察器，然后**连同剩余部分一起丢弃**：
+DeepSeek's `response.completed` frame echoes instructions and tools back, resulting in a single SSE line reaching up to 77KB. The host assembles plugin chunks into lines but enforces a hard cap on buffer size (`internal/pluginhost/adapters_executors.go`, `maxLineBufferSize = 64*1024`). Once the buffer exceeds this limit before encountering a newline, it feeds the partial buffer to the usage observer and **discards the buffer along with the remainder of the line**:
 
 ```go
 if len(lineBuffer) > maxLineBufferSize {
@@ -17,24 +17,24 @@ if len(lineBuffer) > maxLineBufferSize {
 }
 ```
 
-半截 JSON 解析失败，后半截再无机会拼回，usage 就此丢失。是否触发取决于上游 chunk 边界恰好有没有把这行切开——所以表现为间歇性丢失，而不是稳定失败。
+Parsing the truncated JSON fails, the remainder of the line is never reassembled, and usage data is permanently lost. Whether this occurs depends on whether an upstream chunk boundary split that 77KB line across chunks—explaining the intermittent behavior.
 
-在插件里按同一算法重放整条流可以直接区分两种情况：`term_complete=false` 且 `flushes=1` 的请求宿主记 0，`term_complete=true` 的请求正常。
+Replaying streams within the plugin confirmed this: requests with `term_complete=false` and `flushes=1` logged 0 tokens on the host, while requests with `term_complete=true` logged correctly.
 
-## 决定
+## Decision
 
-responses 与 anthropic 协议面上，插件把上游字节按 SSE 换行边界重新切 chunk，每条完整行（含换行符）在一个 chunk 内发出；流结束时若还剩不完整尾行，单独发出。
+On the `responses` and `anthropic` surfaces, the plugin re-frames upstream bytes on SSE newline boundaries, emitting each complete line (including newline) within a single chunk. Any trailing incomplete frame left when the stream ends is emitted separately.
 
-字节内容、顺序、帧结构都不变，只是分块边界变了。宿主在同一轮循环里就能把这行消费掉，缓冲区随即清空，64KB 上限不再有机会触发。
+Payload content, ordering, and SSE frame structures remain unchanged; only chunk boundaries change. The host consumes the complete line in a single pass, clearing its buffer immediately and preventing the 64KB cap from triggering.
 
-chat 协议面不动：宿主自己给该面组帧，插件仍然只发裸 JSON 载荷并丢弃上游的 `[DONE]`。
+The `chat` surface remains unchanged: the host frames chat chunks itself, so the plugin continues emitting bare JSON payloads and stripping upstream `[DONE]`.
 
-修复后实测连续 7 次请求全部带 token，0 次丢失。
+After this fix, 7 consecutive test requests all recorded full token counts with 0 drops.
 
-## 为什么不改用别的手段
+## Why Other Alternatives Were Rejected
 
-- **减小终态帧**：帧大是因为上游回显 `instructions`/`tools`。删字段会破坏协议对齐直通（ADR-0001），也让客户端拿不到它自己发过的内容。
-- **拆成多条 `data:` 行**：SSE 允许一个事件的数据跨多条 `data:` 行由客户端拼接，但宿主的用量解析逐行读 JSON，拆行等于让宿主继续读不到。
-- **只修宿主**：`lineBuffer = nil` 丢弃数据确实是宿主的问题，值得上游修复；但插件无法等待上游发版，而行对齐在插件侧就能消除触发条件。
+- **Truncating terminal frames**: The frame is large because upstream echoes `instructions`/`tools`. Removing fields violates protocol-aligned passthrough (ADR-0001) and deprives clients of their submitted context.
+- **Splitting across multiple `data:` lines**: While SSE permits data across multiple `data:` lines, the host parses JSON line-by-line; splitting lines prevents the host from reading the usage object.
+- **Fixing host only**: Discarding buffers upon reaching `maxLineBufferSize` is an upstream host bug worth addressing; however, the plugin cannot wait for a host release, and line alignment in the plugin eliminates the trigger condition immediately.
 
-行对齐不依赖宿主实现细节里的具体数值：即使上限改成别的值，整行一次送达也不会触发任何「读到换行前先攒着」的分支。
+Line alignment does not depend on specific buffer thresholds: even if the host changes `maxLineBufferSize`, delivering whole lines avoids buffering incomplete lines across read cycles.

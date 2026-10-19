@@ -1,7 +1,7 @@
 package deepseekcpa
 
 // keysResourcePath serves the browser page for managing DeepSeek credentials.
-// The host mounts it at /v0/resource/plugins/deepseek-cpa/keys, which is not
+// The host mounts it at /v0/resource/plugins/deepseek-cpa/credentials, which is not
 // management-authenticated, so the page itself carries no data: it asks for the
 // management key once, stores it in this origin's localStorage, and calls the
 // authenticated /v0/management routes from there.
@@ -11,7 +11,7 @@ package deepseekcpa
 const keysResourcePath = "/credentials"
 
 const keysPage = `<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -43,34 +43,34 @@ const keysPage = `<!doctype html>
 </head>
 <body>
 <h1>DeepSeek Keys</h1>
-<p class="hint">密钥由 CLIProxyAPI 托管，保存在宿主的凭证目录里。本页只是调用管理接口的界面，密钥本身不会出现在页面里。</p>
+<p class="hint">API keys are stored and managed by CLIProxyAPI in the host credentials directory. This page provides a management UI; API keys are never exposed in this interface.</p>
 
 <section id="mgmt-section">
-  <h2>管理密钥</h2>
-  <p class="hint" id="mgmt-note" style="margin:0 0 10px">CLIProxyAPI 管理密钥。面板登录时勾选过「记住密码」的话，这里会自动读取，无需再填。</p>
+  <h2>Management Key</h2>
+  <p class="hint" id="mgmt-note" style="margin:0 0 10px">CLIProxyAPI management key. If "Remember Password" was enabled during panel login, it is read automatically.</p>
   <div class="row" id="mgmt-form">
     <div>
-      <label for="mgmt">管理密钥</label>
+      <label for="mgmt">Management Key</label>
       <input id="mgmt" type="password" autocomplete="off" placeholder="management secret-key">
     </div>
-    <button id="save-mgmt">保存</button>
+    <button id="save-mgmt">Save</button>
   </div>
-  <button id="change-mgmt" style="display:none">更换管理密钥</button>
+  <button id="change-mgmt" style="display:none">Change Management Key</button>
 </section>
 
 <section>
-  <h2>现有密钥</h2>
-  <div id="keys" class="empty">尚未加载</div>
+  <h2>Existing Keys</h2>
+  <div id="keys" class="empty">Not loaded yet</div>
 </section>
 
 <section>
-  <h2>添加密钥</h2>
+  <h2>Add Key</h2>
   <div class="row">
     <div>
-      <label for="apikey">DeepSeek API key</label>
+      <label for="apikey">DeepSeek API Key</label>
       <input id="apikey" type="password" autocomplete="off" placeholder="sk-...">
     </div>
-    <button id="add">添加</button>
+    <button id="add">Add</button>
   </div>
 </section>
 
@@ -145,7 +145,7 @@ const keysPage = `<!doctype html>
   function call(method, path, body) {
     var key = managementKey();
     if (!key) {
-      return Promise.reject(new Error("请先填写管理密钥"));
+      return Promise.reject(new Error("Please enter the management key first"));
     }
     var options = { method: method, headers: { "X-Management-Key": key } };
     if (body !== undefined) {
@@ -171,12 +171,12 @@ const keysPage = `<!doctype html>
     keysBox.className = "";
     if (!keys || !keys.length) {
       keysBox.className = "empty";
-      keysBox.textContent = "还没有添加任何密钥。";
+      keysBox.textContent = "No keys added yet.";
       return;
     }
     var table = document.createElement("table");
     var head = document.createElement("tr");
-    ["名称", "状态", "可用", ""].forEach(function (title) {
+    ["Name", "Status", "Available", ""].forEach(function (title) {
       var th = document.createElement("th");
       th.textContent = title;
       head.appendChild(th);
@@ -192,17 +192,17 @@ const keysPage = `<!doctype html>
       st.textContent = item.status || (item.disabled ? "disabled" : "active");
       row.appendChild(st);
       var avail = document.createElement("td");
-      avail.textContent = item.available ? "是" : "否";
+      avail.textContent = item.available ? "Yes" : "No";
       row.appendChild(avail);
       var action = document.createElement("td");
       var remove = document.createElement("button");
       remove.className = "danger";
-      remove.textContent = "删除";
+      remove.textContent = "Delete";
       remove.addEventListener("click", function () {
-        if (!confirm("删除 " + (item.name || "该密钥") + "？")) { return; }
+        if (!confirm("Delete " + (item.name || "this key") + "?")) { return; }
         remove.disabled = true;
         call("DELETE", BASE + "?name=" + encodeURIComponent(item.name))
-          .then(function () { setStatus("已删除 " + item.name, "ok"); return load(); })
+          .then(function () { setStatus("Deleted " + item.name, "ok"); return load(); })
           .catch(function (error) { remove.disabled = false; setStatus(error.message, "error"); });
       });
       action.appendChild(remove);
@@ -215,7 +215,7 @@ const keysPage = `<!doctype html>
   function load() {
     if (!managementKey()) {
       keysBox.className = "empty";
-      keysBox.textContent = "填写管理密钥后加载。";
+      keysBox.textContent = "Enter management key to load.";
       showKeyForm();
       return Promise.resolve();
     }
@@ -226,9 +226,9 @@ const keysPage = `<!doctype html>
       })
       .catch(function (error) {
         keysBox.className = "empty";
-        keysBox.textContent = "加载失败。";
+        keysBox.textContent = "Failed to load.";
         setStatus(error.message, "error");
-        showKeyForm("管理密钥无效或已变更，请重新输入。");
+        showKeyForm("Invalid or changed management key. Please re-enter.");
       });
   }
 
@@ -239,45 +239,45 @@ const keysPage = `<!doctype html>
   function showKeyForm(note) {
     mgmtForm.style.display = "";
     changeButton.style.display = "none";
-    mgmtNote.textContent = note || "CLIProxyAPI 管理密钥。本插件只在本机浏览器保存一次，之后不再询问。";
+    mgmtNote.textContent = note || "CLIProxyAPI management key. Saved locally in this browser.";
   }
 
   function hideKeyForm() {
     mgmtForm.style.display = "none";
     changeButton.style.display = "";
     mgmtNote.textContent = panelManagementKey()
-      ? "已使用面板记住的管理密钥（勾选了「记住密码」）。"
-      : "已使用本机保存的管理密钥。";
+      ? "Using remembered management key from the panel."
+      : "Using locally saved management key.";
   }
 
   document.getElementById("save-mgmt").addEventListener("click", function () {
     var value = mgmtInput.value.trim();
-    if (!value) { setStatus("管理密钥不能为空", "error"); return; }
+    if (!value) { setStatus("Management key cannot be empty", "error"); return; }
     localStorage.setItem(STORE, value);
-    setStatus("管理密钥已保存在本机浏览器", "ok");
+    setStatus("Management key saved in local browser", "ok");
     load().then(function () {
       // Only hide the form once the stored key actually worked: a wrong key
       // counts toward the host's failed-attempt ban, so it must stay visible.
-      if (status.className === "ok") { hideKeyForm(); } else { showKeyForm("密钥无效，请重新输入。"); }
+      if (status.className === "ok") { hideKeyForm(); } else { showKeyForm("Invalid key. Please re-enter."); }
     });
   });
 
   changeButton.addEventListener("click", function () {
     mgmtInput.value = "";
     localStorage.removeItem(STORE);
-    showKeyForm("输入新的管理密钥。面板里勾选过「记住密码」时，下次仍会优先读面板的值。");
+    showKeyForm("Enter a new management key.");
     mgmtInput.focus();
   });
 
   document.getElementById("add").addEventListener("click", function () {
     var apiKey = apiInput.value.trim();
-    if (!apiKey) { setStatus("请填写 DeepSeek API key", "error"); return; }
+    if (!apiKey) { setStatus("Please enter a DeepSeek API key", "error"); return; }
     var button = document.getElementById("add");
     button.disabled = true;
     call("POST", BASE, { api_key: apiKey })
       .then(function (payload) {
         apiInput.value = "";
-        setStatus("已添加 " + (payload && payload.name ? payload.name : "密钥"), "ok");
+        setStatus("Added " + (payload && payload.name ? payload.name : "key"), "ok");
         return load();
       })
       .catch(function (error) { setStatus(error.message, "error"); })
@@ -288,12 +288,12 @@ const keysPage = `<!doctype html>
   var saved = localStorage.getItem(STORE);
   if (fromPanel) {
     mgmtForm.style.display = "none";
-    mgmtNote.textContent = "已使用面板记住的管理密钥（勾选了「记住密码」）。";
+    mgmtNote.textContent = "Using remembered management key from the panel.";
     load();
   } else if (saved) {
     mgmtInput.value = saved;
     mgmtForm.style.display = "none";
-    mgmtNote.textContent = "正在使用本机保存的管理密钥…";
+    mgmtNote.textContent = "Using locally saved management key...";
     load();
   } else {
     showKeyForm();

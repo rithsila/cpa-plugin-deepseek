@@ -2,10 +2,13 @@
 status: superseded by ADR-0004
 ---
 
-# thinking.apply 靠 body 形状分发
+# thinking.apply Dispatches by Body Shape
 
-宿主调用 `thinking.apply` 时只给 `Provider`、`Model`、已归一的 `Config`（Mode/Budget/Level）和 `Body`，**不给协议格式**。而 DeepSeek 三个协议面的 thinking 字段完全不同：`chat-completions` 用 `thinking.type` + `reasoning_effort`，`anthropic` 用 `reasoning.effort` + `output_config.effort`，`responses` 用 `reasoning.effort`。
+When the host invokes `thinking.apply`, it only provides `Provider`, `Model`, normalized `Config` (Mode/Budget/Level), and `Body`—**it does not provide the protocol format**. However, DeepSeek's three protocol surfaces use completely different thinking fields: `chat-completions` uses `thinking.type` + `reasoning_effort`, `anthropic` uses `reasoning.effort` + `output_config.effort`, and `responses` uses `reasoning.effort`.
 
-三个可选做法：靠 model 元数据带协议标记（apply 请求不保证有这个字段）、靠嗅探 body 形状、只补缺失字段不做归一化。
+Three possible approaches:
+1. Rely on model metadata carrying protocol flags (not guaranteed in apply requests).
+2. Sniff the request body shape.
+3. Only populate missing fields without normalization.
 
-选择嗅探 body 形状：有 `input` 即 `responses`，有顶层 `system` 且有 `max_tokens` 即 `anthropic`，其余按 `chat-completions`。三种载荷的结构差异足够大，判错时会写进不存在的字段而不是写进错的字段，属于能在测试里锁住的可控风险。代价是这个判定必须写死在 `thinking.apply` 里，不能像其他能力面那样按请求上下文取格式。
+We chose to sniff the body shape: having `input` implies `responses`; having top-level `system` and `max_tokens` implies `anthropic`; otherwise treat as `chat-completions`. Structural differences between the three payloads are large enough that a misclassification writes to a non-existent field rather than corrupting an existing one—a manageable risk verifiable in unit tests. The trade-off is hardcoding this detection inside `thinking.apply` rather than extracting the format from the request context.

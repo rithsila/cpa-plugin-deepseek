@@ -1,11 +1,11 @@
-# 不实现 thinking_applier，thinking 字段原样透传
+# Do Not Implement thinking_applier; Pass Thinking Fields As-Is
 
-ADR-0003 决定实现 `thinking_applier`，靠载荷形状分发三套 thinking 字段。实施时查宿主源码发现该能力面对本插件不可达，因此改为不实现。
+ADR-0003 originally decided to implement `thinking_applier` by sniffing payload shapes. During implementation, host source code inspection revealed that this capability surface is unreachable for this plugin, so we decided not to implement it.
 
-宿主在请求路径上用协议格式名查找 applier（`internal/thinking/apply.go`）：responses 被规整为 `codex`，anthropic 为 `claude`，chat 为 `openai`，然后调用 `GetProviderApplier(<格式名>)`。而插件的 applier 由宿主按插件返回的 `thinking.identifier` 注册（`internal/pluginhost/adapters_usage_translation.go`），本插件返回的是 `deepseek-cpa`。两个名字永不相等，所以插件实现的 `thinking.apply` 永远不会被调用。
+The host looks up appliers using the protocol format name on the request path (`internal/thinking/apply.go`): responses maps to `codex`, anthropic to `claude`, and chat to `openai`, calling `GetProviderApplier(<format_name>)`. However, plugin appliers are registered using the plugin's `thinking.identifier` (`internal/pluginhost/adapters_usage_translation.go`), which for this plugin is `deepseek-cpa`. Because these names never match, `thinking.apply` on the plugin would never be called.
 
-改用原生格式名注册同样不可行：`RegisterPluginProvider` 在发现同名原生 applier 时直接拒绝注册，而 `claude`、`openai`、`codex` 都是原生名。即便能注册，劫持这些名字也会影响同进程内所有走该格式的请求，而不只是本插件的模型。
+Registering under native format names is also disallowed: `RegisterPluginProvider` immediately rejects registrations that collide with built-in appliers (`claude`, `openai`, `codex`). Even if allowed, hijacking native names would affect all requests across the entire process, not just requests for this plugin's models.
 
-同时宿主不会剥离插件模型的 thinking 字段：本插件的模型以 `UserDefined: true` 公布，宿主对这类模型走 passthrough 分支，客户端写入的 thinking 参数原样到达上游。真机实测 anthropic 协议面的 thinking 会话工作正常，正是走这条路径。
+Furthermore, the host does not strip thinking fields from plugin models: this plugin announces models with `UserDefined: true`, so the host takes the passthrough path, allowing client-specified thinking parameters to reach upstream directly. Live testing on the `anthropic` surface confirmed thinking sessions work correctly via this exact path.
 
-结论：不声明 `thinking_applier`，能力面从六个减为五个。客户端的 thinking 字段原样透传，插件的职责是不要碰它们。将来宿主支持按 provider key 查找 applier 时，可以重新提出这个能力面，届时的实现依据见 ADR-0003。
+Conclusion: We do not declare `thinking_applier`, reducing declared capability surfaces from six to five. Client thinking fields pass through untouched; the plugin's responsibility is not to modify them. If the host supports looking up appliers by provider key in the future, this capability can be revisited based on ADR-0003.

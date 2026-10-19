@@ -1,42 +1,50 @@
 # cpa-plugin-deepseek
 
-CLIProxyAPI 的 DeepSeek 原生插件。客户端用它自己的协议访问，插件把请求原样送进 DeepSeek 的同协议端点——**不做跨协议翻译**。
+Native DeepSeek plugin for **CLIProxyAPI**. Clients connect using their native protocol, and the plugin forwards requests directly to DeepSeek's matching endpoint—**without cross-protocol translation**.
 
-插件标识：`deepseek-cpa`（同时是插件 ID、`.so`/`.dylib` 文件名、配置键、模型命名空间前缀）。
+Plugin Identifier: `deepseek-cpa` (used as plugin ID, `.so`/`.dylib`/`.dll` filename, config key, and model namespace prefix).
 
-## 它解决什么
+## What It Solves
 
-内置的 `openai-compatibility` 通道能跑 DeepSeek，但走的是「客户端协议 → 内部表示 → 上游协议」的转换路径。DeepSeek 有三个协议面，各自的 thinking 字段和分帧规则都不同，任何中间层丢字段都会让会话从「降级」变成「中断」。
+CLIProxyAPI's built-in `openai-compatibility` channel routes requests through a generic conversion pipeline: `client protocol → internal format → upstream protocol`.
 
-本插件只做三件事：判定协议面 → 选对应端点 → 改写模型名。其余字节原样转发。详见 [ADR-0001](docs/adr/0001-protocol-aligned-passthrough.md)。
+DeepSeek has three protocol surfaces (`anthropic`, `chat-completions`, and `responses`). Each has different reasoning/thinking fields and event streaming rules. Any middleware that drops or shifts fields can break sessions:
+- For DeepSeek thinking models with `tools`, all past `reasoning_content` must be echoed back byte-for-byte. Missing even one turn causes an immediate HTTP 400 error.
+- Clients like Claude Code bind tool calls and thinking blocks tightly; cross-protocol conversion risks field mismatch.
 
-| 客户端协议 | 上游端点 |
+This plugin only does three things:
+1. Detect client protocol surface.
+2. Select the matching DeepSeek endpoint.
+3. Rewrite the model name prefix.
+
+All other request and response bytes pass through untouched. See [ADR-0001](docs/adr/0001-protocol-aligned-passthrough.md).
+
+| Client Protocol | DeepSeek Upstream Endpoint |
 |---|---|
-| `anthropic`（Claude Code 等） | `https://api.deepseek.com/anthropic/v1/messages` |
-| `chat-completions`（OpenAI SDK 等） | `https://api.deepseek.com/chat/completions` |
+| `anthropic` (Claude Code, etc.) | `https://api.deepseek.com/anthropic/v1/messages` |
+| `chat-completions` (OpenAI SDK, etc.) | `https://api.deepseek.com/chat/completions` |
 | `responses` | `https://api.deepseek.com/responses` |
 
-## 要求
+## Requirements
 
-- CLIProxyAPI v8.0.32（以 `go.mod` 钉住的版本为准），且构建时启用了 cgo 插件支持（`X-CPA-SUPPORT-PLUGIN: 1`）
-- 平台：`linux/{amd64,arm64}`、`darwin/{amd64,arm64}`、`windows/{amd64,arm64}`、`freebsd/amd64`
+- **CLIProxyAPI** v8.0.32 (pinned in `go.mod`), built with cgo plugin support (`X-CPA-SUPPORT-PLUGIN: 1`).
+- **Platforms**: `linux/{amd64,arm64}`, `darwin/{amd64,arm64}`, `windows/{amd64,arm64}`, `freebsd/amd64`.
+  Matches the official CLIProxyAPI plugin-capable releases. (`freebsd/arm64` is excluded because upstream only provides a no-plugin build).
 
-  与 CLIProxyAPI 官方发布的可加载插件的平台清单一致。`freebsd/arm64` 不在其中：上游只提供 `freebsd_aarch64_no-plugin` 构建，没有能加载插件的宿主。
+## Installation
 
-## 安装
-
-从 [Releases](https://github.com/xspeed1989/cpa-plugin-deepseek/releases) 下载对应平台的 zip，解压到 CLIProxyAPI 的 `plugins/` 目录：
+Download the zip package for your platform from [Releases](https://github.com/rithsila/cpa-plugin-deepseek/releases) and extract it to the `plugins/` directory of CLIProxyAPI:
 
 ```bash
-# 以 linux/amd64 为例，其他平台把文件名里的平台段换掉即可
-version=0.3.0
-curl -sL -O "https://github.com/xspeed1989/cpa-plugin-deepseek/releases/download/v${version}/deepseek-cpa_${version}_linux_amd64.zip"
+# Example for linux/amd64 (change platform as needed)
+version=0.4.4
+curl -sL -O "https://github.com/rithsila/cpa-plugin-deepseek/releases/download/v${version}/deepseek-cpa_${version}_linux_amd64.zip"
 unzip -o "deepseek-cpa_${version}_linux_amd64.zip" -d <cliproxyapi>/plugins/
 ```
 
-解压后目录里应是 `deepseek-cpa.so`（macOS 为 `deepseek-cpa.dylib`）——插件 ID 就取自这个文件名，不能改。
+After extraction, the file must be named `deepseek-cpa.so` (macOS: `deepseek-cpa.dylib`, Windows: `deepseek-cpa.dll`). The plugin ID is taken directly from the filename.
 
-在 `config.yaml` 里启用：
+Enable the plugin in `config.yaml`:
 
 ```yaml
 plugins:
@@ -46,70 +54,78 @@ plugins:
       enabled: true
 ```
 
-插件**没有自己的配置字段**：端点固定为 DeepSeek 官方地址，模型列表来自上游探测。
+The plugin **requires no custom config fields**: endpoints are fixed to official DeepSeek URLs, and models are probed dynamically from upstream.
 
-启动后确认注册成功：
+Verify plugin registration:
 
 ```bash
-curl -s -H "X-Management-Key: <你的管理密钥>" \
+curl -s -H "X-Management-Key: <your-management-key>" \
   http://127.0.0.1:8317/v0/management/plugins | jq '.plugins[] | {id, registered, effective_enabled}'
 ```
 
-## 管理 DeepSeek 密钥
+## Managing DeepSeek Keys
 
-密钥由宿主托管。两种方式：
+API credentials are managed by the host proxy. You can manage them in two ways:
 
-### 管理面板（推荐）
+### 1. Web Management Page (Recommended)
 
-管理面板 → 插件 → **DeepSeek Keys**（`/v0/resource/plugins/deepseek-cpa/credentials`）。
+Open: Management Panel → Plugins → **DeepSeek Keys** (`/v0/resource/plugins/deepseek-cpa/credentials`).
 
-面板登录时勾选过「记住密码」的话，页面会自动读取并解码面板保存的那把管理密钥，不需要再填；否则才提示输入（只在本机浏览器保存一次）。之后可以直接查看、添加、删除密钥。
+If you checked "Remember Password" during management panel login, the page automatically retrieves your management key. Otherwise, enter your management key once. You can then view, add, and remove DeepSeek API keys directly.
 
-### 命令行
+### 2. Command Line (Management API)
 
-以下路由都需要管理密钥。
+All endpoints require the `X-Management-Key` header:
 
 ```bash
-# 新增（同一个 key 重复添加会覆盖同名凭证）
+# Add a key (adding the same key again updates the credential idempotently)
 curl -s -X POST -H "X-Management-Key: <key>" -H "Content-Type: application/json" \
   -d '{"api_key":"sk-..."}' \
   http://127.0.0.1:8317/v0/management/plugins/deepseek-cpa/keys
 
-# 列出（不会返回密钥本身）
+# List keys (keys themselves are never returned)
 curl -s -H "X-Management-Key: <key>" \
   http://127.0.0.1:8317/v0/management/plugins/deepseek-cpa/keys
 
-# 删除
+# Delete a key
 curl -s -X DELETE -H "X-Management-Key: <key>" \
   "http://127.0.0.1:8317/v0/management/plugins/deepseek-cpa/keys?name=deepseek-cpa-<hash>.json"
 ```
 
-凭证文件落在宿主的 auth 目录（`oauth.auth-dir`），内容是 `{"type":"deepseek-cpa","api_key":"..."}`。删除是幂等的：文件已不存在也返回 204。
+Credentials are saved in the host's auth directory (`oauth.auth-dir`) as `{"type":"deepseek-cpa","api_key":"..."}`.
 
-## 使用模型
+## Using Models
 
-客户端必须带 `deepseek-cpa/` 前缀，前缀之后的部分原样作为上游模型名：
+Clients must use the `deepseek-cpa/` prefix. Everything after the prefix is forwarded as the upstream model name:
+
+```python
+# OpenAI SDK
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8317/v1", api_key="<proxy-client-key>")
+response = client.chat.completions.create(
+    model="deepseek-cpa/deepseek-v4-pro",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
 
 ```bash
-# OpenAI SDK
-client = OpenAI(base_url="http://127.0.0.1:8317/v1", api_key="<代理的客户端密钥>")
-client.chat.completions.create(model="deepseek-cpa/deepseek-v4-pro", messages=[...])
-
 # Claude Code
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8317
-export ANTHROPIC_AUTH_TOKEN=<代理的客户端密钥>
+export ANTHROPIC_AUTH_TOKEN=<proxy-client-key>
 export ANTHROPIC_MODEL=deepseek-cpa/deepseek-v4-pro
 ```
 
-**模型列表以上游为准。** 插件向 `https://api.deepseek.com/models` 探测并发布结果；上游没公布的模型不会被注册，因而也无法路由。每条模型的能力参数（上下文窗口、输出上限、输入模态、推理档位）同样照上游发布，插件不自带默认值：留空的话宿主会套用它自己的 Codex 默认值（272000 上下文、16384 输出、所有模型都收图像、默认 `medium` 推理），从而谎报 DeepSeek 的实际限制。
+### Upstream Model Discovery
 
-- 没有任何 DeepSeek 凭证时：返回内置引导列表，且不发起任何网络请求。
-- 探测失败：退回内置列表并记一条日志，不影响插件加载与请求。
-- 强制重新探测：`POST /v0/management/plugins/deepseek-cpa/models/refresh`。宿主要在下次插件重载（重启或改插件配置）后才应用新列表。
+The plugin probes `https://api.deepseek.com/models` and publishes the active model list:
+- If no DeepSeek credential exists yet: returns a built-in bootstrap list without making network requests.
+- If upstream probing fails: falls back to the built-in list and logs a message.
+- To refresh the model list immediately: `POST /v0/management/plugins/deepseek-cpa/models/refresh`. The host loads the updated list upon reload or restart.
 
-## 用量日志
+## Usage Logs
 
-每个完成的请求写一条结构化日志，JSON 在消息体内：
+Every completed request emits a structured JSON log line:
 
 ```
 request usage {"model":"deepseek-cpa/deepseek-v4-pro","response_model":"deepseek-v4-pro",
@@ -118,47 +134,49 @@ request usage {"model":"deepseek-cpa/deepseek-v4-pro","response_model":"deepseek
 "latency_ms":1187,"ttft_ms":1134,"request_id":"…","trace_id":"…"}
 ```
 
-日志不含密钥、凭证内容、请求体或响应体。插件不存储、不聚合、不提供看板——统计请自己接这条日志。
+No API keys, credentials, prompt contents, or response bodies are ever logged.
 
-## 已知限制
+## Known Limitations
 
-- **只支持 DeepSeek 官方端点**。第三方中转或逆向上游不在范围内。
-- **模型列表严格照上游**：上游不公布但实际可用的名字（例如 `deepseek-v4-pro[1m]`）在探测成功后不可用，因为宿主只路由已注册的模型。这是刻意取舍，见 [spec](docs/spec/0001-deepseek-cpa-plugin.md) 的模型公布段落。
-- **不实现 `thinking_applier`**：宿主的 applier 查找键是协议格式名，插件按 `thinking.identifier` 注册，两者永不相等，该能力面不可达。客户端的 thinking 参数靠透传生效。见 [ADR-0004](docs/adr/0004-no-thinking-applier.md)。
-- **用量日志没有协议面**：宿主的用量记录没有格式字段，且其 `request_id` 与执行请求不相关，无法反查。
-- **运行中新增凭证不会立刻刷新模型列表**：宿主只在插件重载时询问模型。
+- **Official DeepSeek endpoints only**: Third-party relays or reverse proxies are not supported.
+- **Model names follow upstream**: Models not returned by `https://api.deepseek.com/models` cannot be routed.
+- **No `thinking_applier`**: Plugin does not modify thinking parameters; client thinking configurations pass through as-is (see [ADR-0004](docs/adr/0004-no-thinking-applier.md)).
+- **Usage logs lack protocol format**: The host's usage event format does not report the incoming protocol surface.
 
-## 开发
-
-```bash
-./build.sh                                  # 当前平台的 .so/.dylib → dist/
-go test ./...                               # 单测（不联网）
-python3 test/abi_smoke.py dist/deepseek-cpa.linux.amd64   # 真实动态库的 ABI 冒烟
-./scripts/package-release.sh 0.2.0          # 打 release 归档 + checksums
-python3 test/package_check.py               # 校验归档与 registry.json
-```
-
-真机验证脚本需要一把真实 DeepSeek key（key 由宿主持有，脚本本身不接触）：
+## Development
 
 ```bash
-python3 test/anthropic_e2e.py   # 多轮 tools + thinking 会话
-python3 test/stream_e2e.py      # anthropic 与 responses 的流式终止事件
-python3 test/chat_e2e.py        # thinking 开关双向对照、usage、[DONE]
+./build.sh                                  # Build .so/.dylib for current platform into dist/
+go test ./...                               # Run unit tests (offline)
+python3 test/abi_smoke.py dist/deepseek-cpa.darwin.arm64  # Smoke test dynamic library ABI
+./scripts/package-release.sh 0.4.4          # Package release archive + checksums
+python3 test/package_check.py               # Validate packages against registry.json
 ```
 
-### 发布
+### E2E Tests
 
-打 tag 即发布，矩阵取自 [`platforms.txt`](platforms.txt)：
+End-to-end tests require a running CLIProxyAPI host with a valid DeepSeek key:
 
 ```bash
-# 先把 registry.json 的 version 改成与 tag 一致，发布流程会校验
-git tag v0.2.0 && git push origin v0.2.0
+python3 test/anthropic_e2e.py   # Multi-turn thinking + tool call session
+python3 test/stream_e2e.py      # Terminal event validation for anthropic & responses
+python3 test/chat_e2e.py        # Thinking on/off comparison, usage tokens, [DONE]
 ```
 
-CI 在原生 runner 上分别构建（FreeBSD 在 VM 内构建），汇总 `checksums.txt` 并创建 Release。也可以在 Actions 里手动触发 `release` 工作流试跑整张矩阵——手动运行不会发布。`platforms.txt` 是平台矩阵的唯一来源，`build.sh`、`scripts/package-release.sh` 与发布工作流都经 `scripts/platforms.sh` 读取它。
+### Releasing
 
-## 文档
+Releases are triggered by pushing a git tag:
 
-- [CONTEXT.md](CONTEXT.md) —— 术语表
-- [docs/adr/](docs/adr/) —— 四个架构决策
-- [docs/spec/0001-deepseek-cpa-plugin.md](docs/spec/0001-deepseek-cpa-plugin.md) —— 完整规格
+```bash
+# 1. Update version in registry.json to match tag
+# 2. Tag and push
+git tag v0.4.4 && git push origin v0.4.4
+```
+
+CI builds all targets across the matrix in [platforms.txt](platforms.txt) and creates a GitHub Release with SHA-256 checksums.
+
+## Documentation
+
+- [CONTEXT.md](CONTEXT.md) — Domain glossary and terms
+- [docs/adr/](docs/adr/) — Architecture Decision Records
+- [docs/spec/0001-deepseek-cpa-plugin.md](docs/spec/0001-deepseek-cpa-plugin.md) — Full technical specification

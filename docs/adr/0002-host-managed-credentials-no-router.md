@@ -1,9 +1,9 @@
-# 凭证交宿主管，且不实现 model_router
+# Host-Managed Credentials Without Model Router
 
-DeepSeek 的 API key 是不过期的静态密钥，没有 OAuth、没有 device code、没有 token 刷新周期。`auth.login.start` / `auth.login.poll` / `auth.refresh` 对它都是空活，实现它们只是为了勾满接口。
+DeepSeek API keys are static keys that do not expire: there is no OAuth, no device code flow, and no token refresh interval. Implementing `auth.login.start`, `auth.login.poll`, or `auth.refresh` would just be no-op boilerplate to satisfy interface signatures.
 
-选择实现 `auth_provider` 的 `auth.identifier` + `auth.parse`，并让管理页通过 `/v0/management` 路由调用 `host.auth.save` 写入凭证，其余三个方法显式返回不支持。收益是凭证、调度、用量记账全在宿主手里，插件不复制一份密钥池。
+We choose to implement `auth.identifier` and `auth.parse` on the `auth_provider` capability, and have the management page invoke `host.auth.save` via `/v0/management` routes to write credentials. The other three methods explicitly return unsupported. The benefit is that credentials, scheduling, and usage logging remain completely in the host's control; the plugin does not duplicate a key pool.
 
-由此**不实现 `model_router`**：`TargetKind: "self"` 的直连路由按文档明确「without selecting an auth record」，会绕过刚接上的宿主凭证选择，两者互斥。模型由 `model_provider` 以 `model.static` 公布、`executor_model_scope: static`，路由交给宿主正常的模型→提供商→凭证路径。
+Consequently, **we do not implement `model_router`**: direct routing with `TargetKind: "self"` is documented as acting "without selecting an auth record", which bypasses the host's credential selection mechanism. Models are announced by `model_provider` via `model.static` with `executor_model_scope: static`, leaving routing to the host's standard `model → provider → credential` path.
 
-上游的 401 / 402 / 429 原样透传，不在 executor 内部重试——宿主调度器要看见这些状态码才能切下一个凭证。
+Upstream HTTP 401, 402, and 429 status codes are passed through transparently without retrying inside the executor, allowing the host scheduler to observe them and failover to the next credential.

@@ -1,7 +1,7 @@
-# 协议对齐直通，不做跨协议翻译
+# Protocol-Aligned Passthrough Without Cross-Protocol Translation
 
-DeepSeek 提供 `chat-completions`、`anthropic`、`responses` 三个协议面，且带 `tools` 的 thinking 会话要求历史 `reasoning_content` 原样回传，漏一轮即 400。任何跨协议翻译层都会在某个字段上丢信息，而这里的代价是会话直接不可用而不是降级。
+DeepSeek provides three protocol surfaces: `chat-completions`, `anthropic`, and `responses`. For thinking models making tool calls, all past `reasoning_content` turns must be echoed back verbatim; omitting even one turn causes an immediate HTTP 400 error. Any cross-protocol translation layer risks dropping or altering fields, making multi-turn sessions fail completely rather than gracefully degrading.
 
-因此插件声明三个协议面同时作为 `executor_input_formats` 和 `executor_output_formats`，把客户端的原始协议 body 送进同协议的上游端点，只在模型名上改写。代价是插件不支持「Anthropic 客户端打 `chat-completions` 端点」这类交叉组合——需要交叉的请求继续走宿主内置转换器，那本来就不是本插件要解决的问题。
+Therefore, the plugin declares all three protocol surfaces simultaneously as `executor_input_formats` and `executor_output_formats`. It forwards the client's original protocol body directly to the matching upstream endpoint, rewriting only the model name. The trade-off is that the plugin does not support mixed cross-combinations (such as an Anthropic client calling a `chat-completions` endpoint)—requests requiring protocol conversion continue to use the host's built-in translators, which is outside this plugin's scope.
 
-由此推论：`request_translator`、`response_translator`、`request_normalizer`、`response_normalizer`、`request_interceptor`、`response_interceptor`、`response_stream_interceptor` 在本插件里全是恒等函数，一律不声明。声明了就等于给自己养一条永不执行的分支。
+Consequence: `request_translator`, `response_translator`, `request_normalizer`, `response_normalizer`, `request_interceptor`, `response_interceptor`, and `response_stream_interceptor` are all identity functions in this plugin and are explicitly not declared. Declaring them would only create dead branches that are never executed.
